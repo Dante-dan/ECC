@@ -16,7 +16,7 @@ function normalizeRelativePath(filePath) {
   return String(filePath || '').replace(/\\/g, '/');
 }
 
-function isLegacyRuntimeSource(plan, operation) {
+function isManagedRuntimeSource(plan, operation) {
   if (!operation || operation.kind !== 'copy-file' || operation.ownership !== 'managed') {
     return false;
   }
@@ -26,7 +26,8 @@ function isLegacyRuntimeSource(plan, operation) {
     plan.targetRoot,
     operation.destinationPath || ''
   ));
-  const match = source.match(/^\.opencode\/(plugins|tools)\/(.+\.ts)$/);
+  const match = source.match(/^\.opencode\/(plugins|tools)\/(.+\.ts)$/)
+    || source.match(/^\.opencode\/dist\/(plugins|tools)\/(.+\.js)$/);
   return Boolean(match) && relativeDestination === `${match[1]}/${match[2]}`;
 }
 
@@ -71,7 +72,7 @@ function prepareOpencodeRuntimeMigration(plan, migration) {
     .filter(operation => operation.destinationPath)
     .map(operation => comparablePath(operation.destinationPath)));
   const operationsToRemove = (previousState.operations || []).filter(operation => (
-    isLegacyRuntimeSource(plan, operation)
+    isManagedRuntimeSource(plan, operation)
     && !currentDestinations.has(comparablePath(operation.destinationPath))
   ));
 

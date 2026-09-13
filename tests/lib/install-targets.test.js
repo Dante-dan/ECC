@@ -1262,7 +1262,7 @@ function runTests() {
   if (test('opencode home plan installs compiled plugins and tools at active runtime paths', () => {
     const adapter = getInstallTargetAdapter('opencode');
     const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'install-targets-opencode-plan-'));
-    const homeDir = '/Users/example';
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'install-targets-opencode-home-'));
     const targetRoot = path.join(homeDir, '.config', 'opencode');
 
     try {
@@ -1311,6 +1311,7 @@ function runTests() {
       )), 'Should retain the OpenCode configuration alongside the compiled runtime');
     } finally {
       fs.rmSync(repoRoot, { recursive: true, force: true });
+      fs.rmSync(homeDir, { recursive: true, force: true });
     }
   })) passed++; else failed++;
 
@@ -1410,6 +1411,47 @@ function runTests() {
       assert.ok(missing.includes('.opencode/dist/tools/index.js'), 'Sibling artefacts under the bad path should be reported');
     } finally {
       fs.rmSync(repoRoot, { recursive: true, force: true });
+    }
+  })) passed++; else failed++;
+
+  if (test('opencode runtime planning treats only missing paths as an empty compiled directory', () => {
+    const adapter = getInstallTargetAdapter('opencode');
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'install-targets-opencode-plan-errors-'));
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'install-targets-opencode-plan-home-'));
+    const opencodeRoot = path.join(repoRoot, '.opencode');
+    try {
+      fs.mkdirSync(opencodeRoot, { recursive: true });
+      fs.writeFileSync(path.join(opencodeRoot, 'dist'), 'not-a-directory');
+      assert.doesNotThrow(() => adapter.planOperations({
+        repoRoot,
+        homeDir,
+        modules: [{ id: 'platform-configs', paths: ['.opencode'] }],
+      }), 'ENOTDIR should behave like an absent compiled runtime directory');
+
+      fs.rmSync(path.join(opencodeRoot, 'dist'));
+      fs.mkdirSync(path.join(opencodeRoot, 'dist', 'plugins'), { recursive: true });
+      fs.mkdirSync(path.join(opencodeRoot, 'dist', 'tools'), { recursive: true });
+      const originalReaddirSync = fs.readdirSync;
+      fs.readdirSync = (directoryPath, options) => {
+        if (directoryPath === path.join(opencodeRoot, 'dist', 'plugins')) {
+          const error = new Error('permission denied');
+          error.code = 'EACCES';
+          throw error;
+        }
+        return originalReaddirSync(directoryPath, options);
+      };
+      try {
+        assert.throws(() => adapter.planOperations({
+          repoRoot,
+          homeDir,
+          modules: [{ id: 'platform-configs', paths: ['.opencode'] }],
+        }), error => error && error.code === 'EACCES');
+      } finally {
+        fs.readdirSync = originalReaddirSync;
+      }
+    } finally {
+      fs.rmSync(repoRoot, { recursive: true, force: true });
+      fs.rmSync(homeDir, { recursive: true, force: true });
     }
   })) passed++; else failed++;
 

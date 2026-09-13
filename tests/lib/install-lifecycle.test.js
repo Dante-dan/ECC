@@ -1297,6 +1297,8 @@ function runTests() {
             fs.mkdirSync(path.join(distDir, 'plugins'), { recursive: true });
             fs.mkdirSync(path.join(distDir, 'tools'), { recursive: true });
             fs.writeFileSync(path.join(distDir, 'index.js'), 'module.exports = {};\\n');
+            fs.writeFileSync(path.join(distDir, 'plugins', 'index.js'), 'module.exports = {};\\n');
+            fs.writeFileSync(path.join(distDir, 'tools', 'index.js'), 'module.exports = {};\\n');
           },
         });
 

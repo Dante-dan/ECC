@@ -95,7 +95,17 @@ function createNativeRootOperation(moduleId, sourceRelativePath, destinationPath
 }
 
 function listCompiledRuntimeFiles(directoryPath, prefix = '') {
-  return fs.readdirSync(directoryPath, { withFileTypes: true })
+  let entries;
+  try {
+    entries = fs.readdirSync(directoryPath, { withFileTypes: true });
+  } catch (error) {
+    if (error && MISSING_ARTEFACT_ERROR_CODES.has(error.code)) {
+      return [];
+    }
+    throw error;
+  }
+
+  return entries
     .sort((left, right) => left.name.localeCompare(right.name))
     .flatMap(entry => {
       const relativePath = path.join(prefix, entry.name);
