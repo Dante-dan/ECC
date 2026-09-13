@@ -34,6 +34,10 @@ const {
   preserveUnwrittenFiles,
 } = require('./ownership-guard');
 const { cleanupLegacyOpencodeInstall } = require('./opencode-legacy-migration');
+const {
+  prepareOpencodeRuntimeMigration,
+  removeLegacyOpencodeRuntimeSources,
+} = require('./opencode-runtime-migration');
 const { buildInstallIndex, rewriteRelativeLinks } = require('./link-rewrite');
 const { adaptAntigravityAgent } = require('./antigravity-agent');
 
@@ -398,7 +402,10 @@ function prepareHookConsentMigration(plan, migration) {
 function previewInstallPlan(plan) {
   const migration = prepareHookConsentMigration(
     plan,
-    prepareUserOwnedFileGuard(plan, prepareClaudeSkillMigration(plan))
+    prepareUserOwnedFileGuard(
+      plan,
+      prepareOpencodeRuntimeMigration(plan, prepareClaudeSkillMigration(plan))
+    )
   );
   const appliedPlan = {
     ...plan,
@@ -451,7 +458,10 @@ function applyInstallPlanLocked(plan, dependencies = {}, settingsLockHeld = fals
   }
   const migration = prepareHookConsentMigration(
     plan,
-    prepareUserOwnedFileGuard(plan, prepareClaudeSkillMigration(plan))
+    prepareUserOwnedFileGuard(
+      plan,
+      prepareOpencodeRuntimeMigration(plan, prepareClaudeSkillMigration(plan))
+    )
   );
   const appliedPlan = {
     ...plan,
@@ -590,6 +600,7 @@ function applyInstallPlanLocked(plan, dependencies = {}, settingsLockHeld = fals
       if (hasLegacyMigration) {
         removeLegacyClaudeSkillFiles(migration, plan.targetRoot);
       }
+      removeLegacyOpencodeRuntimeSources(plan, migration);
 
       if (shouldSetClaudeCommitAttributionPreference(appliedPlan)) {
         writeClaudeCommitAttributionPreference(
