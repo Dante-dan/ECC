@@ -718,15 +718,20 @@ function runTests() {
         warnings: [],
       };
 
-      delete oldOperations[0].contentSha256;
-      writeJson(targetRoot, 'ecc-install-state.json', { ...metadata, operations: oldOperations });
+      const unverifiableOldOperations = oldOperations.map((operation, index) => {
+        if (index !== 0) {
+          return { ...operation };
+        }
+        const { contentSha256: _contentSha256, ...unverifiableOperation } = operation;
+        return unverifiableOperation;
+      });
+      writeJson(targetRoot, 'ecc-install-state.json', { ...metadata, operations: unverifiableOldOperations });
       assert.throws(
         () => applyInstallPlanDirect(plan),
         /Refusing to remove unverifiable managed OpenCode runtime source/
       );
       assert.ok(!fs.existsSync(path.join(targetRoot, 'tools', 'index.js')),
         'Should fail before writing the replacement runtime when a managed source has no digest');
-      oldOperations[0].contentSha256 = digest(oldToolPath);
       writeJson(targetRoot, 'ecc-install-state.json', { ...metadata, operations: oldOperations });
 
       fs.rmSync(oldToolPath);
