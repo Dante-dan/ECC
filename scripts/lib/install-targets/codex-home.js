@@ -7,4 +7,5 @@ module.exports = createInstallTargetAdapter({
   rootSegments: ['.codex'],
   installStatePathSegments: ['ecc-install-state.json'],
   nativeRootRelativePath: '.codex',
+  excludedSourcePaths: ['.agents'],
 });

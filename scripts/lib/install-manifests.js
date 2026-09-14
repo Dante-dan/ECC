@@ -631,7 +631,7 @@ function resolveInstallPlan(options = {}) {
   const visitingIds = new Set();
   const resolvedIds = new Set();
 
-  function resolveModule(moduleId, dependencyOf, rootRequesterId) {
+  function resolveModule(moduleId, dependencyOf) {
     const module = manifests.modulesById.get(moduleId);
     if (!module) {
       throw new Error(`Unknown install module: ${moduleId}`);
@@ -655,8 +655,12 @@ function resolveInstallPlan(options = {}) {
 
     if (!supportsTarget) {
       if (dependencyOf) {
-        skippedTargetIds.add(rootRequesterId || dependencyOf);
-        return false;
+        // A module that explicitly supports the selected target remains useful
+        // when one of its cross-harness dependencies does not. Treat that
+        // dependency as inapplicable for this target instead of dropping the
+        // target-capable root module with it.
+        skippedTargetIds.add(moduleId);
+        return true;
       }
       skippedTargetIds.add(moduleId);
       return false;
@@ -674,8 +678,7 @@ function resolveInstallPlan(options = {}) {
     for (const dependencyId of module.dependencies) {
       const dependencyResolved = resolveModule(
         dependencyId,
-        moduleId,
-        rootRequesterId || moduleId
+        moduleId
       );
       if (!dependencyResolved) {
         visitingIds.delete(moduleId);
@@ -692,7 +695,7 @@ function resolveInstallPlan(options = {}) {
   }
 
   for (const moduleId of effectiveRequestedIds) {
-    resolveModule(moduleId, null, moduleId);
+    resolveModule(moduleId, null);
   }
 
   const selectedModules = manifests.modules.filter(module => selectedIds.has(module.id));

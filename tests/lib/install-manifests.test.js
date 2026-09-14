@@ -698,7 +698,7 @@ function runTests() {
     );
   })) passed++; else failed++;
 
-  if (test('skips a requested module when its dependency chain does not support the target', () => {
+  if (test('keeps a requested target-capable module when a dependency does not support the target', () => {
     const repoRoot = createTestRepo();
     try {
       writeJson(path.join(repoRoot, 'manifests', 'install-modules.json'), {
@@ -736,8 +736,8 @@ function runTests() {
       });
 
       const plan = resolveInstallPlan({ repoRoot, profileId: 'core', target: 'claude' });
-      assert.deepStrictEqual(plan.selectedModuleIds, []);
-      assert.deepStrictEqual(plan.skippedModuleIds, ['parent']);
+      assert.deepStrictEqual(plan.selectedModuleIds, ['parent']);
+      assert.deepStrictEqual(plan.skippedModuleIds, ['child']);
     } finally {
       cleanupTestRepo(repoRoot);
     }

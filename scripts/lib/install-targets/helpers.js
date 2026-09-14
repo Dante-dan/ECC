@@ -298,6 +298,19 @@ function createFlatRuleOperations(options) {
 }
 
 function createInstallTargetAdapter(config) {
+  function supportsSourcePath(sourceRelativePath) {
+    const normalizedSourcePath = normalizeRelativePath(sourceRelativePath);
+    const excludedSourcePaths = Array.isArray(config.excludedSourcePaths)
+      ? config.excludedSourcePaths.map(normalizeRelativePath)
+      : [];
+
+    return !isForeignPlatformPath(normalizedSourcePath, config.target)
+      && !excludedSourcePaths.some(excludedPath => (
+        normalizedSourcePath === excludedPath
+        || normalizedSourcePath.startsWith(`${excludedPath}/`)
+      ));
+  }
+
   const adapter = {
     id: config.id,
     target: config.target,
@@ -351,6 +364,7 @@ function createInstallTargetAdapter(config) {
         strategy: adapter.determineStrategy(normalizedSourcePath),
       });
     },
+    supportsSourcePath,
     planOperations(input = {}) {
       if (typeof config.planOperations === 'function') {
         return config.planOperations(input, adapter);
@@ -360,7 +374,7 @@ function createInstallTargetAdapter(config) {
         return input.modules.flatMap(module => {
           const paths = Array.isArray(module.paths) ? module.paths : [];
           return paths
-            .filter(p => !isForeignPlatformPath(p, config.target))
+            .filter(supportsSourcePath)
             .map(sourceRelativePath => adapter.createScaffoldOperation(
               module.id,
               sourceRelativePath,
@@ -372,7 +386,7 @@ function createInstallTargetAdapter(config) {
       const module = input.module || {};
       const paths = Array.isArray(module.paths) ? module.paths : [];
       return paths
-        .filter(p => !isForeignPlatformPath(p, config.target))
+        .filter(supportsSourcePath)
         .map(sourceRelativePath => adapter.createScaffoldOperation(
           module.id,
           sourceRelativePath,

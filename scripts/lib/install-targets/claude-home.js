@@ -3,7 +3,6 @@ const path = require('path');
 const {
   createInstallTargetAdapter,
   createRemappedOperation,
-  isForeignPlatformPath,
   normalizeRelativePath,
   planClaudeHooksOperations,
 } = require('./helpers');
@@ -53,6 +52,7 @@ module.exports = createInstallTargetAdapter({
   rootSegments: ['.claude'],
   installStatePathSegments: ['ecc', 'install-state.json'],
   nativeRootRelativePath: '.claude-plugin',
+  excludedSourcePaths: ['.agents'],
   planOperations(input, adapter) {
     const modules = Array.isArray(input.modules)
       ? input.modules
@@ -66,7 +66,7 @@ module.exports = createInstallTargetAdapter({
     return modules.flatMap(module => {
       const paths = Array.isArray(module.paths) ? module.paths : [];
       return paths
-        .filter(p => !isForeignPlatformPath(p, adapter.target))
+        .filter(adapter.supportsSourcePath)
         .flatMap(sourceRelativePath => {
           if (
             module.id === 'hooks-runtime'

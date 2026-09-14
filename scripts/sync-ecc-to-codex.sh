@@ -339,7 +339,7 @@ for agent_file in "$CODEX_AGENTS_SRC"/*.toml; do
 done
 
 # Skills are NOT synced here — Codex CLI reads directly from
-# ~/.agents/skills/ (installed by ECC installer / npx skills).
+# ~/.agents/skills/ (Codex's user-level skill discovery path).
 # Copying into ~/.codex/skills/ was unnecessary.
 
 log "Generating prompt files from ECC commands"
