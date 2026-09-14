@@ -1181,7 +1181,7 @@
     {
       "id": "docs-pl",
       "kind": "docs",
-      "description": "Polish (pl) translated reference docs for agents, commands, skills, and rules.",
+      "description": "Polish (pl) getting-started and core-concepts guide with a terminology glossary.",
       "paths": [
         "docs/pl"
       ],
