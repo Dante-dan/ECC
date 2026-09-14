@@ -23,6 +23,10 @@ const {
 const { filterMcpConfig, parseDisabledMcpServers } = require('../mcp-config');
 const { assertWithinTrustedRoot } = require('../path-safety');
 const {
+  prepareLegacyAgentsMigration,
+  removeLegacyAgentsFiles,
+} = require('./legacy-agents-migration');
+const {
   assertSafeClaudeSkillOperation,
   prepareClaudeSkillMigration,
   removeLegacyClaudeSkillFiles,
@@ -398,7 +402,10 @@ function prepareHookConsentMigration(plan, migration) {
 function previewInstallPlan(plan) {
   const migration = prepareHookConsentMigration(
     plan,
-    prepareUserOwnedFileGuard(plan, prepareClaudeSkillMigration(plan))
+    prepareUserOwnedFileGuard(
+      plan,
+      prepareLegacyAgentsMigration(plan, prepareClaudeSkillMigration(plan))
+    )
   );
   const appliedPlan = {
     ...plan,
@@ -451,7 +458,10 @@ function applyInstallPlanLocked(plan, dependencies = {}, settingsLockHeld = fals
   }
   const migration = prepareHookConsentMigration(
     plan,
-    prepareUserOwnedFileGuard(plan, prepareClaudeSkillMigration(plan))
+    prepareUserOwnedFileGuard(
+      plan,
+      prepareLegacyAgentsMigration(plan, prepareClaudeSkillMigration(plan))
+    )
   );
   const appliedPlan = {
     ...plan,
@@ -590,6 +600,7 @@ function applyInstallPlanLocked(plan, dependencies = {}, settingsLockHeld = fals
       if (hasLegacyMigration) {
         removeLegacyClaudeSkillFiles(migration, plan.targetRoot);
       }
+      removeLegacyAgentsFiles(migration, plan.targetRoot);
 
       if (shouldSetClaudeCommitAttributionPreference(appliedPlan)) {
         writeClaudeCommitAttributionPreference(

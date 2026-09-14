@@ -14,6 +14,10 @@ const {
   prepareClaudeSkillMigration,
 } = require('./install/claude-skill-migration');
 const {
+  prepareLegacyAgentsMigration,
+  removeLegacyAgentsFiles,
+} = require('./install/legacy-agents-migration');
+const {
   getLegacyAntigravityLocation,
   inspectLegacyAntigravityState,
 } = require('./install/antigravity-legacy-migration');
@@ -1908,7 +1912,10 @@ function prepareRepairMigration(plan, record) {
     installStatePath: record.installStatePath,
     statePreview: buildAdapterDerivedStatePreview(plan.statePreview, record),
   };
-  const migration = prepareClaudeSkillMigration(trustedPlan);
+  const migration = prepareLegacyAgentsMigration(
+    trustedPlan,
+    prepareClaudeSkillMigration(trustedPlan)
+  );
   return {
     migration,
     plan: {
@@ -2131,10 +2138,16 @@ function repairInstalledStates(options = {}) {
       const legacyMigrationPaths = migration.legacyOperationsToRemove.map(
         operation => operation.destinationPath
       );
+      const legacyAgentsMigrationPaths = migration.legacyAgentsOperationsToRemove.map(
+        operation => operation.destinationPath
+      );
+      const hasLegacyAgentsStateMigration = migration.legacyAgentsOperationsToDetach.length > 0;
       const plannedRepairs = [...new Set([
         ...(needsOpencodeBuild ? [opencodeBuildRepairPath] : []),
         ...repairOperations.map(operation => operation.destinationPath),
         ...legacyMigrationPaths,
+        ...legacyAgentsMigrationPaths,
+        ...(hasLegacyAgentsStateMigration ? [record.installStatePath] : []),
       ])];
 
       if (options.dryRun) {
@@ -2150,7 +2163,8 @@ function repairInstalledStates(options = {}) {
         };
       }
 
-      const hasLegacyMigration = migration.legacyOperationsToRemove.length > 0;
+      const hasLegacyMigration = migration.legacyOperationsToRemove.length > 0
+        || hasLegacyAgentsStateMigration;
       const repairedPaths = needsOpencodeBuild ? [opencodeBuildRepairPath] : [];
       if (migration.requiresBridgeState && (repairOperations.length > 0 || hasLegacyMigration)) {
         writeRefreshedInstallState(record, migration.bridgeState);
@@ -2181,6 +2195,8 @@ function repairInstalledStates(options = {}) {
             repairedPaths.push(removedPath);
           }
         }
+        removeLegacyAgentsFiles(migration, record.targetRoot);
+        repairedPaths.push(...legacyAgentsMigrationPaths.filter(filePath => !fs.existsSync(filePath)));
       }
       const changedInstalledBytes = repairOperations.length > 0
         || needsOpencodeBuild
