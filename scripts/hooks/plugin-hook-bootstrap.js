@@ -6,7 +6,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const { ensureAgentDataHomeEnv } = require('../lib/agent-data-home');
 
-const SHELL_PROBE_TIMEOUT_MS = 2000;
+const SHELL_PROBE_TIMEOUT_MS = 5000;
 
 function readStdinRaw() {
   try {

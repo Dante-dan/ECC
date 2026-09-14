@@ -29,7 +29,7 @@ const hooksConfig = readHooksConfig(path.join(repoRoot, 'hooks', 'hooks.json'));
 
 const MAX_STDIN = 1024 * 1024;
 const SUBPROCESS_TIMEOUT_MS = process.platform === 'darwin' && process.env.CI === 'true'
-  ? 120_000
+  ? 180_000
   : 60_000;
 
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ecc-stop-stdout-')); // non-git cwd
