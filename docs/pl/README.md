@@ -76,7 +76,10 @@ W Codex użyj `$configure-ecc`, aby przejść przez konfigurację dostosowaną d
 
 ### Inne środowiska
 
-| Środowisko | Minimalna instalacja |
+Polecenia uruchamiaj z głównego katalogu pobranego repozytorium. Wiersz OpenCode wybiera
+pełny profil i jawnie włącza automatyczne Hooki.
+
+| Środowisko | Polecenie instalacji z repozytorium |
 |---|---|
 | Cursor | `./install.sh --profile minimal --target cursor` |
 | Gemini CLI | `./install.sh --profile minimal --target gemini` |
@@ -91,20 +94,26 @@ Pełna macierz środowisk i wymagania znajdują się w
 
 ## Instalacja polskiej dokumentacji
 
-Polski używa krótkiego kodu języka `pl`; nie jest potrzebny wariant regionalny. Obie formy
-polecenia poniżej wybierają komponent `locale:pl` i instalują dokumentację w
-`~/.claude/docs/pl/`:
+Polski używa kodu `pl`; akceptowany jest także alias `pl-PL`. Użyj lokalnej kopii
+repozytorium zawierającej katalog `docs/pl/` i komponent `locale:pl`. Uruchom poniższe
+polecenia z głównego katalogu tej kopii, po zainstalowaniu zależności repozytorium.
+Wymagany jest Node.js 18 lub nowszy. Wydanie `ecc-universal@2.2.1` nie zawiera jeszcze
+polskiej dokumentacji.
+
+Najpierw sprawdź plan bez zapisywania plików instalacji:
 
 ```bash
-./install.sh --target claude --locale pl
-npx ecc-universal@2.2.1 install --target claude --locale pl
+node scripts/install-apply.js --target claude --locale pl --dry-run
 ```
 
-Najpierw możesz obejrzeć plan bez zapisywania zmian:
+Następnie zainstaluj polską dokumentację w `~/.claude/docs/pl/`:
 
 ```bash
-./install.sh --target claude --locale pl --dry-run
+node scripts/install-apply.js --target claude --locale pl
 ```
+
+Ten wybór instaluje moduł dokumentacji `docs-pl`; nie instaluje pełnego profilu ECC
+ani automatycznych Hooków.
 
 ## Co zawiera ECC
 
