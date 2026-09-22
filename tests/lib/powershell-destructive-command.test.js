@@ -488,6 +488,9 @@ test('distinguishes foreach statements from the pipeline alias', () => {
   expectRules('1 | foreach { Remove-Item -Force C:/tmp/demo }', [
     RULES.REMOVE_FORCE,
   ]);
+  expectRules('1 | foreach ({ Remove-Item -Force C:/tmp/demo })', [
+    RULES.REMOVE_FORCE,
+  ]);
 });
 
 test('classifies invoked static script-block variables but leaves assignments inert', () => {

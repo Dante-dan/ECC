@@ -428,6 +428,7 @@ function invokesContainerResult(prefix, options = {}) {
   const pipelineStart = clause.lastIndexOf('|');
   const pipelineCommand = clause.slice(pipelineStart + 1).trim();
   const isForeachLoopHeader = Boolean(options.groupingExpression) &&
+    pipelineStart === -1 &&
     /^foreach$/i.test(pipelineCommand);
   return /(?:^|\s)(?:&|\.)\s*$/.test(clause) ||
     /\.\s*(?:foreach|where)\s*$/i.test(clause) ||
