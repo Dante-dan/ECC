@@ -163,13 +163,13 @@ function uninstallArgv(scope) {
   return ['plugin', 'uninstall', 'ecc@ecc', '--scope', scope, '--keep-data'];
 }
 
-function expectedMigrationCalls(sourceScope, destinationScope, hooks = 'standard') {
+function expectedMigrationCalls(sourceScope, destinationScope) {
   return [
     ['plugin', 'list', '--json'],
     ['plugin', 'marketplace', 'list', '--json'],
     ['plugin', 'marketplace', 'update', 'ecc'],
     ['plugin', 'marketplace', 'list', '--json'],
-    installArgv(destinationScope, hooks),
+    installArgv(destinationScope),
     ['plugin', 'list', '--json'],
     ['plugin', 'list', '--json'],
     uninstallArgv(sourceScope),
