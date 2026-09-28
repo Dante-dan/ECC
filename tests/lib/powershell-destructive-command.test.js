@@ -489,6 +489,9 @@ test('distinguishes foreach statements from the pipeline alias', () => {
     "foreach ($r in 'aaaaaaaaaaaaaa') {}; Remove-Item -Force C:/tmp/demo",
     [RULES.REMOVE_FORCE]
   );
+  expectRules("where ($r in 'aaaaaaaaaaaaaa') { $r }", [
+    RULES.DYNAMIC_EXECUTION,
+  ]);
   expectRules('1 | foreach { Remove-Item -Force C:/tmp/demo }', [
     RULES.REMOVE_FORCE,
   ]);
