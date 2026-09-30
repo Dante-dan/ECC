@@ -71,6 +71,18 @@ class OllamaProvider(LLMProvider):
                 "messages": [msg.to_dict() for msg in input.messages],
                 "stream": False,
             }
+            if input.tools:
+                payload["tools"] = [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "parameters": tool.parameters,
+                        },
+                    }
+                    for tool in input.tools
+                ]
             options: dict[str, Any] = {}
             if input.temperature != 1.0:
                 options["temperature"] = input.temperature
