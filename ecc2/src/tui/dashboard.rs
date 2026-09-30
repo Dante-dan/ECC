@@ -107,6 +107,9 @@ fn append_output_records(
 pub struct Dashboard {
     db: StateStore,
     cfg: Config,
+    config_path: PathBuf,
+    #[cfg(test)]
+    test_config_file: Option<tests::TestConfigFile>,
     notifier: DesktopNotifier,
     webhook_notifier: WebhookNotifier,
     sessions: Vec<Session>,
@@ -529,6 +532,10 @@ fn load_session_harnesses(
 impl Dashboard {
     /// Builds the dashboard and hydrates its initial bounded output snapshot.
     pub fn new(db: StateStore, cfg: Config) -> Self {
+        Self::new_with_config_path(db, cfg, Config::config_path())
+    }
+
+    fn new_with_config_path(db: StateStore, cfg: Config, config_path: PathBuf) -> Self {
         let pane_size_percent = configured_pane_size(&cfg, cfg.pane_layout);
         let initial_cost_metrics_signature = metrics_file_signature(&cfg.cost_metrics_path());
         let initial_tool_activity_signature =
@@ -565,6 +572,9 @@ impl Dashboard {
         let mut dashboard = Self {
             db,
             cfg,
+            config_path,
+            #[cfg(test)]
+            test_config_file: None,
             notifier,
             webhook_notifier,
             sessions,
@@ -1793,13 +1803,13 @@ impl Dashboard {
     }
 
     pub fn cycle_pane_layout(&mut self) {
-        let config_path = crate::config::Config::config_path();
-        self.cycle_pane_layout_with_save(&config_path, |cfg| cfg.save());
+        let config_path = self.config_path.clone();
+        self.cycle_pane_layout_with_save(&config_path, |cfg| cfg.save_to_path(&config_path));
     }
 
     pub fn set_pane_layout(&mut self, layout: PaneLayout) {
-        let config_path = crate::config::Config::config_path();
-        self.set_pane_layout_with_save(layout, &config_path, |cfg| cfg.save());
+        let config_path = self.config_path.clone();
+        self.set_pane_layout_with_save(layout, &config_path, |cfg| cfg.save_to_path(&config_path));
     }
 
     fn cycle_pane_layout_with_save<F>(&mut self, config_path: &std::path::Path, save: F)
@@ -1872,8 +1882,8 @@ impl Dashboard {
     }
 
     fn auto_split_layout_after_spawn(&mut self, spawned_count: usize) -> Option<String> {
-        let config_path = crate::config::Config::config_path();
-        self.auto_split_layout_after_spawn_with_save(spawned_count, &config_path, |cfg| cfg.save())
+        let config_path = self.config_path.clone();
+        self.auto_split_layout_after_spawn_with_save(spawned_count, &config_path, |cfg| cfg.save_to_path(&config_path))
     }
 
     fn auto_split_layout_after_spawn_with_save<F>(
@@ -1986,8 +1996,8 @@ impl Dashboard {
     }
 
     pub fn toggle_theme(&mut self) {
-        let config_path = crate::config::Config::config_path();
-        self.toggle_theme_with_save(&config_path, |cfg| cfg.save());
+        let config_path = self.config_path.clone();
+        self.toggle_theme_with_save(&config_path, |cfg| cfg.save_to_path(&config_path));
     }
 
     fn toggle_theme_with_save<F>(&mut self, config_path: &std::path::Path, save: F)
@@ -2014,18 +2024,18 @@ impl Dashboard {
     }
 
     pub fn increase_pane_size(&mut self) {
-        let config_path = crate::config::Config::config_path();
+        let config_path = self.config_path.clone();
         self.adjust_pane_size_with_save(PANE_RESIZE_STEP_PERCENT as isize, &config_path, |cfg| {
-            cfg.save()
+            cfg.save_to_path(&config_path)
         });
     }
 
     pub fn decrease_pane_size(&mut self) {
-        let config_path = crate::config::Config::config_path();
+        let config_path = self.config_path.clone();
         self.adjust_pane_size_with_save(
             -(PANE_RESIZE_STEP_PERCENT as isize),
             &config_path,
-            |cfg| cfg.save(),
+            |cfg| cfg.save_to_path(&config_path),
         );
     }
 
@@ -3926,7 +3936,7 @@ impl Dashboard {
 
     pub fn toggle_auto_dispatch_policy(&mut self) {
         self.cfg.auto_dispatch_unread_handoffs = !self.cfg.auto_dispatch_unread_handoffs;
-        match self.cfg.save() {
+        match self.cfg.save_to_path(&self.config_path) {
             Ok(()) => {
                 let state = if self.cfg.auto_dispatch_unread_handoffs {
                     "enabled"
@@ -3935,7 +3945,7 @@ impl Dashboard {
                 };
                 self.set_operator_note(format!(
                     "daemon auto-dispatch {state} | saved to {}",
-                    crate::config::Config::config_path().display()
+                    self.config_path.display()
                 ));
             }
             Err(error) => {
@@ -3947,7 +3957,7 @@ impl Dashboard {
 
     pub fn toggle_auto_merge_policy(&mut self) {
         self.cfg.auto_merge_ready_worktrees = !self.cfg.auto_merge_ready_worktrees;
-        match self.cfg.save() {
+        match self.cfg.save_to_path(&self.config_path) {
             Ok(()) => {
                 let state = if self.cfg.auto_merge_ready_worktrees {
                     "enabled"
@@ -3956,7 +3966,7 @@ impl Dashboard {
                 };
                 self.set_operator_note(format!(
                     "daemon auto-merge {state} | saved to {}",
-                    crate::config::Config::config_path().display()
+                    self.config_path.display()
                 ));
             }
             Err(error) => {
@@ -3968,7 +3978,7 @@ impl Dashboard {
 
     pub fn toggle_auto_worktree_policy(&mut self) {
         self.cfg.auto_create_worktrees = !self.cfg.auto_create_worktrees;
-        match self.cfg.save() {
+        match self.cfg.save_to_path(&self.config_path) {
             Ok(()) => {
                 let state = if self.cfg.auto_create_worktrees {
                     "enabled"
@@ -3977,7 +3987,7 @@ impl Dashboard {
                 };
                 self.set_operator_note(format!(
                     "default worktree creation {state} | saved to {}",
-                    crate::config::Config::config_path().display()
+                    self.config_path.display()
                 ));
             }
             Err(error) => {
@@ -4002,11 +4012,11 @@ impl Dashboard {
 
         let previous = self.cfg.auto_dispatch_limit_per_session;
         self.cfg.auto_dispatch_limit_per_session = next;
-        match self.cfg.save() {
+        match self.cfg.save_to_path(&self.config_path) {
             Ok(()) => self.set_operator_note(format!(
                 "auto-dispatch limit set to {} handoff(s) per lead | saved to {}",
                 self.cfg.auto_dispatch_limit_per_session,
-                crate::config::Config::config_path().display()
+                self.config_path.display()
             )),
             Err(error) => {
                 self.cfg.auto_dispatch_limit_per_session = previous;
@@ -11402,10 +11412,6 @@ diff --git a/src/lib.rs b/src/lib.rs
 
     #[test]
     fn toggle_auto_worktree_policy_persists_config() {
-        let tempdir = std::env::temp_dir().join(format!("ecc2-worktree-policy-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&tempdir).unwrap();
-        let previous_home = std::env::var_os("HOME");
-        std::env::set_var("HOME", &tempdir);
 
         let mut dashboard = test_dashboard(
             vec![sample_session(
@@ -11425,22 +11431,16 @@ diff --git a/src/lib.rs b/src/lib.rs
         assert!(!dashboard.cfg.auto_create_worktrees);
         let expected_note = format!(
             "default worktree creation disabled | saved to {}",
-            crate::config::Config::config_path().display()
+            dashboard.config_path.display()
         );
         assert_eq!(
             dashboard.operator_note.as_deref(),
             Some(expected_note.as_str())
         );
 
-        let saved = std::fs::read_to_string(crate::config::Config::config_path()).unwrap();
+        let saved = std::fs::read_to_string(dashboard.config_path).unwrap();
         assert!(saved.contains("auto_create_worktrees = false"));
 
-        if let Some(home) = previous_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
-        let _ = std::fs::remove_dir_all(tempdir);
     }
 
     #[test]
@@ -12219,7 +12219,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         let mut cfg = Config::default();
         cfg.cost_budget_usd = 10.0;
 
-        let mut dashboard = Dashboard::new(db, cfg);
+        let mut dashboard = dashboard_with_isolated_config(db, cfg);
         dashboard.sessions = vec![budget_session("sess-1", 3_500, 8.25)];
 
         assert_eq!(
@@ -12234,7 +12234,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         let mut cfg = Config::default();
         cfg.cost_budget_usd = 10.0;
 
-        let mut dashboard = Dashboard::new(db, cfg);
+        let mut dashboard = dashboard_with_isolated_config(db, cfg);
         dashboard.sessions = vec![budget_session("sess-1", 1_000, 5.0)];
 
         assert_eq!(
@@ -12254,7 +12254,7 @@ diff --git a/src/lib.rs b/src/lib.rs
             critical: 0.85,
         };
 
-        let mut dashboard = Dashboard::new(db, cfg);
+        let mut dashboard = dashboard_with_isolated_config(db, cfg);
         dashboard.sessions = vec![budget_session("sess-1", 1_000, 7.0)];
 
         assert_eq!(
@@ -12269,7 +12269,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         let mut cfg = Config::default();
         cfg.cost_budget_usd = 10.0;
 
-        let mut dashboard = Dashboard::new(db, cfg);
+        let mut dashboard = dashboard_with_isolated_config(db, cfg);
         dashboard.sessions = vec![budget_session("sess-1", 1_000, 9.0)];
 
         assert_eq!(
@@ -12285,7 +12285,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         cfg.token_budget = 1_000;
         cfg.cost_budget_usd = 10.0;
 
-        let mut dashboard = Dashboard::new(db, cfg);
+        let mut dashboard = dashboard_with_isolated_config(db, cfg);
         dashboard.sessions = vec![budget_session("sess-1", 760, 2.0)];
         dashboard.last_budget_alert_state = BudgetState::Alert50;
 
@@ -12310,7 +12310,7 @@ diff --git a/src/lib.rs b/src/lib.rs
             critical: 0.85,
         };
 
-        let mut dashboard = Dashboard::new(db, cfg);
+        let mut dashboard = dashboard_with_isolated_config(db, cfg);
         dashboard.sessions = vec![budget_session("sess-1", 710, 2.0)];
         dashboard.last_budget_alert_state = BudgetState::Alert50;
 
@@ -12346,7 +12346,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         )
         .expect("persist metrics");
 
-        let mut dashboard = Dashboard::new(db, cfg);
+        let mut dashboard = dashboard_with_isolated_config(db, cfg);
         dashboard.refresh();
 
         assert_eq!(dashboard.sessions.len(), 1);
@@ -12378,7 +12378,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         };
         db.insert_session(&session).unwrap();
 
-        let mut dashboard = Dashboard::new(db, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(db, Config::default());
         dashboard
             .db
             .update_state("done-1", &SessionState::Completed)
@@ -12426,7 +12426,7 @@ diff --git a/src/lib.rs b/src/lib.rs
             ),
         )?;
 
-        let mut dashboard = Dashboard::new(db, cfg);
+        let mut dashboard = dashboard_with_isolated_config(db, cfg);
         dashboard
             .db
             .update_state("done-12345678", &SessionState::Completed)?;
@@ -12482,7 +12482,7 @@ diff --git a/src/lib.rs b/src/lib.rs
             ),
         )?;
 
-        let mut dashboard = Dashboard::new(db, cfg);
+        let mut dashboard = dashboard_with_isolated_config(db, cfg);
         dashboard
             .db
             .update_state("done-observation", &SessionState::Completed)?;
@@ -12593,7 +12593,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         let mut cfg = Config::default();
         cfg.db_path = db_path;
 
-        let mut dashboard = Dashboard::new(db, cfg);
+        let mut dashboard = dashboard_with_isolated_config(db, cfg);
         fs::write(
             tempdir.join("metrics").join("tool-usage.jsonl"),
             "{\"id\":\"evt-1\",\"session_id\":\"sess-1\",\"tool_name\":\"Read\",\"input_summary\":\"Read README.md\",\"output_summary\":\"ok\",\"file_paths\":[\"README.md\"],\"timestamp\":\"2026-04-09T00:00:00Z\"}\n",
@@ -12633,7 +12633,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         })
         .unwrap();
 
-        let mut dashboard = Dashboard::new(db, cfg);
+        let mut dashboard = dashboard_with_isolated_config(db, cfg);
         dashboard.refresh();
 
         assert_eq!(dashboard.sessions.len(), 1);
@@ -12698,7 +12698,7 @@ diff --git a/src/lib.rs b/src/lib.rs
             ),
         )?;
 
-        let mut dashboard = Dashboard::new(db, cfg);
+        let mut dashboard = dashboard_with_isolated_config(db, cfg);
         dashboard.refresh();
         dashboard.sync_selection_by_id(Some("session-b"));
         dashboard.sync_selected_diff();
@@ -12998,7 +12998,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         )]);
 
         let db = StateStore::open(&cfg.db_path)?;
-        let mut dashboard = Dashboard::new(db, cfg);
+        let mut dashboard = dashboard_with_isolated_config(db, cfg);
         dashboard.spawn_input = Some(
             "template feature_development for stabilize auth callback with component=billing"
                 .to_string(),
@@ -13093,7 +13093,7 @@ diff --git a/src/lib.rs b/src/lib.rs
             metrics: SessionMetrics::default(),
         })?;
 
-        let mut dashboard = Dashboard::new(db, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(db, Config::default());
         dashboard.selected_session = 1;
         dashboard.sync_selection();
         dashboard.refresh();
@@ -13129,7 +13129,7 @@ diff --git a/src/lib.rs b/src/lib.rs
             db.append_output_line("session-1", OutputStream::Stdout, &format!("line {index}"))?;
         }
 
-        let mut dashboard = Dashboard::new(db, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(db, Config::default());
         dashboard.selected_pane = Pane::Output;
         dashboard.refresh();
         dashboard.sync_output_scroll(3);
@@ -13174,7 +13174,7 @@ diff --git a/src/lib.rs b/src/lib.rs
             db.append_output_line("session-1", OutputStream::Stdout, &format!("line {index}"))?;
         }
 
-        let mut dashboard = Dashboard::new(db, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(db, Config::default());
         dashboard.selected_pane = Pane::Output;
         dashboard.refresh();
         dashboard.sync_output_scroll(4);
@@ -13195,7 +13195,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         db.insert_session(&session)?;
         db.append_output_line("session-1", OutputStream::Stdout, "persisted-before-open")?;
 
-        let mut dashboard = Dashboard::new(db, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(db, Config::default());
         assert!(dashboard
             .selected_output_text()
             .contains("persisted-before-open"));
@@ -13258,7 +13258,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         db.insert_session(&session)?;
         db.append_output_line("session-1", OutputStream::Stdout, "persisted-output")?;
 
-        let mut dashboard = Dashboard::new(db, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(db, Config::default());
         assert!(dashboard
             .selected_output_text()
             .contains("persisted-output"));
@@ -13311,7 +13311,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         ))?;
         db.append_output_line("session-1", OutputStream::Stdout, "first-session")?;
 
-        let mut dashboard = Dashboard::new(db, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(db, Config::default());
         let external = StateStore::open(&db_path)?;
         external.insert_session(&sample_session(
             "session-2",
@@ -13367,7 +13367,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         ))?;
         db.append_output_line("session-1", OutputStream::Stdout, "persisted-before")?;
 
-        let mut dashboard = Dashboard::new(db, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(db, Config::default());
         dashboard
             .session_output_cache
             .get_mut("session-1")
@@ -14062,7 +14062,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         })?;
 
         let dashboard_store = StateStore::open(&db_path)?;
-        let mut dashboard = Dashboard::new(dashboard_store, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(dashboard_store, Config::default());
         dashboard.stop_selected().await;
 
         let session = db
@@ -14102,7 +14102,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         })?;
 
         let dashboard_store = StateStore::open(&db_path)?;
-        let mut dashboard = Dashboard::new(dashboard_store, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(dashboard_store, Config::default());
         dashboard.resume_selected().await;
 
         let session = db
@@ -14144,7 +14144,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         })?;
 
         let dashboard_store = StateStore::open(&db_path)?;
-        let mut dashboard = Dashboard::new(dashboard_store, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(dashboard_store, Config::default());
         dashboard.cleanup_selected_worktree().await;
 
         let session = db
@@ -14183,7 +14183,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         })?;
 
         let dashboard_store = StateStore::open(&db_path)?;
-        let mut dashboard = Dashboard::new(dashboard_store, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(dashboard_store, Config::default());
         dashboard.prune_inactive_worktrees().await;
 
         assert_eq!(
@@ -14245,7 +14245,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         })?;
 
         let dashboard_store = StateStore::open(&db_path)?;
-        let mut dashboard = Dashboard::new(dashboard_store, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(dashboard_store, Config::default());
         dashboard.prune_inactive_worktrees().await;
 
         assert_eq!(
@@ -14302,7 +14302,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         cfg.worktree_retention_secs = 3600;
 
         let dashboard_store = StateStore::open(&db_path)?;
-        let mut dashboard = Dashboard::new(dashboard_store, cfg);
+        let mut dashboard = dashboard_with_isolated_config(dashboard_store, cfg);
         dashboard.prune_inactive_worktrees().await;
 
         assert_eq!(
@@ -14359,7 +14359,7 @@ diff --git a/src/lib.rs b/src/lib.rs
             .args(["commit", "-qm", "dashboard work"])
             .status()?;
 
-        let mut dashboard = Dashboard::new(db, cfg);
+        let mut dashboard = dashboard_with_isolated_config(db, cfg);
         dashboard.sync_selection_by_id(Some(&session_id));
         dashboard.merge_selected_worktree().await;
 
@@ -14449,7 +14449,7 @@ diff --git a/src/lib.rs b/src/lib.rs
             metrics: SessionMetrics::default(),
         })?;
 
-        let mut dashboard = Dashboard::new(db, cfg);
+        let mut dashboard = dashboard_with_isolated_config(db, cfg);
         dashboard.merge_ready_worktrees().await;
 
         let note = dashboard
@@ -14496,7 +14496,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         })?;
 
         let dashboard_store = StateStore::open(&db_path)?;
-        let mut dashboard = Dashboard::new(dashboard_store, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(dashboard_store, Config::default());
         dashboard.delete_selected_session().await;
 
         assert!(
@@ -14531,7 +14531,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         })?;
 
         let dashboard_store = StateStore::open(&db_path)?;
-        let mut dashboard = Dashboard::new(dashboard_store, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(dashboard_store, Config::default());
         dashboard.auto_dispatch_backlog().await;
 
         assert_eq!(
@@ -14566,7 +14566,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         })?;
 
         let dashboard_store = StateStore::open(&db_path)?;
-        let mut dashboard = Dashboard::new(dashboard_store, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(dashboard_store, Config::default());
         dashboard.rebalance_selected_team().await;
 
         assert_eq!(
@@ -14601,7 +14601,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         })?;
 
         let dashboard_store = StateStore::open(&db_path)?;
-        let mut dashboard = Dashboard::new(dashboard_store, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(dashboard_store, Config::default());
         dashboard.rebalance_all_teams().await;
 
         assert_eq!(
@@ -14636,7 +14636,7 @@ diff --git a/src/lib.rs b/src/lib.rs
         })?;
 
         let dashboard_store = StateStore::open(&db_path)?;
-        let mut dashboard = Dashboard::new(dashboard_store, Config::default());
+        let mut dashboard = dashboard_with_isolated_config(dashboard_store, Config::default());
         dashboard.coordinate_backlog().await;
 
         assert_eq!(
@@ -14893,10 +14893,6 @@ diff --git a/src/lib.rs b/src/lib.rs
 
     #[test]
     fn pane_command_mode_sets_layout() {
-        let tempdir = std::env::temp_dir().join(format!("ecc2-pane-command-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&tempdir).unwrap();
-        let previous_home = std::env::var_os("HOME");
-        std::env::set_var("HOME", &tempdir);
 
         let mut dashboard = test_dashboard(Vec::new(), 0);
         dashboard.cfg.pane_layout = PaneLayout::Horizontal;
@@ -14913,20 +14909,10 @@ diff --git a/src/lib.rs b/src/lib.rs
             .as_deref()
             .is_some_and(|note| note.contains("pane layout set to grid | saved to ")));
 
-        if let Some(home) = previous_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
-        let _ = std::fs::remove_dir_all(tempdir);
     }
 
     #[test]
     fn cycle_pane_layout_rotates_and_hides_log_when_leaving_grid() {
-        let tempdir = std::env::temp_dir().join(format!("ecc2-cycle-pane-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&tempdir).unwrap();
-        let previous_home = std::env::var_os("HOME");
-        std::env::set_var("HOME", &tempdir);
 
         let mut dashboard = test_dashboard(Vec::new(), 0);
         dashboard.cfg.pane_layout = PaneLayout::Grid;
@@ -14941,12 +14927,6 @@ diff --git a/src/lib.rs b/src/lib.rs
         assert_eq!(dashboard.pane_size_percent, 44);
         assert_eq!(dashboard.selected_pane, Pane::Sessions);
 
-        if let Some(home) = previous_home {
-            std::env::set_var("HOME", home);
-        } else {
-            std::env::remove_var("HOME");
-        }
-        let _ = std::fs::remove_dir_all(tempdir);
     }
 
     #[test]
@@ -15191,6 +15171,27 @@ diff --git a/src/lib.rs b/src/lib.rs
             .join("\n")
     }
 
+    pub(super) struct TestConfigFile(PathBuf);
+
+    impl TestConfigFile {
+        fn new() -> Self {
+            Self(std::env::temp_dir().join(format!("ecc2-dashboard-config-{}.toml", Uuid::new_v4())))
+        }
+    }
+
+    impl Drop for TestConfigFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    fn dashboard_with_isolated_config(db: StateStore, cfg: Config) -> Dashboard {
+        let config_file = TestConfigFile::new();
+        let mut dashboard = Dashboard::new_with_config_path(db, cfg, config_file.0.clone());
+        dashboard.test_config_file = Some(config_file);
+        dashboard
+    }
+
     fn test_dashboard(sessions: Vec<Session>, selected_session: usize) -> Dashboard {
         let selected_session = selected_session.min(sessions.len().saturating_sub(1));
         let cfg = Config::default();
@@ -15219,7 +15220,10 @@ diff --git a/src/lib.rs b/src/lib.rs
             session_table_state.select(Some(selected_session));
         }
 
+        let config_file = TestConfigFile::new();
         Dashboard {
+            config_path: config_file.0.clone(),
+            test_config_file: Some(config_file),
             db: StateStore::open(Path::new(":memory:")).expect("open test db"),
             pane_size_percent: configured_pane_size(&cfg, cfg.pane_layout),
             cfg,
