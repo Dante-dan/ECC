@@ -411,6 +411,8 @@ function runTests() {
         target,
         projectRoot: '/workspace/ml-app',
         homeDir: '/Users/example',
+        // This checks dependency planning independently of optional build artefacts.
+        exemptValidationCodes: ['opencode-plugin-not-built'],
       });
 
       assert.ok(plan.selectedModuleIds.includes('machine-learning'),
