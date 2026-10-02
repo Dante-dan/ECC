@@ -1,4 +1,4 @@
-const { createInstallTargetAdapter } = require('./helpers');
+const { HOME_INSTALL_EXCLUDED_SOURCE_PATHS, createInstallTargetAdapter } = require('./helpers');
 
 module.exports = createInstallTargetAdapter({
   id: 'codex-home',
@@ -7,5 +7,7 @@ module.exports = createInstallTargetAdapter({
   rootSegments: ['.codex'],
   installStatePathSegments: ['ecc-install-state.json'],
   nativeRootRelativePath: '.codex',
-  excludedSourcePaths: ['.agents'],
+
+  excludedSourcePaths: HOME_INSTALL_EXCLUDED_SOURCE_PATHS,
+
 });

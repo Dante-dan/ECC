@@ -29,7 +29,8 @@ function isLegacyAgentsOperation(plan, operation) {
   }
 
   const sourceRelativePath = normalizeRelativePath(operation.sourceRelativePath);
-  if (!sourceRelativePath.startsWith('.agents/')) {
+  if (!sourceRelativePath.startsWith('.agents/')
+    || sourceRelativePath.split('/').some(segment => !segment || segment === '.' || segment === '..')) {
     return false;
   }
 
@@ -41,11 +42,13 @@ function isLegacyAgentsOperation(plan, operation) {
 }
 
 function inspectLegacyAgentsOperation(plan, operation) {
-  assertWithinTrustedRoot(
-    operation.destinationPath,
-    plan.targetRoot,
-    'inspect legacy managed .agents file'
-  );
+  try {
+    assertWithinTrustedRoot(
+      operation.destinationPath, plan.targetRoot, 'inspect legacy managed .agents file'
+    );
+  } catch (error) {
+    return { removable: false, warning: `Preserved unsafe legacy .agents path ${operation.destinationPath}: ${error.message}` };
+  }
 
   let stat;
   try {
@@ -153,17 +156,24 @@ function cleanupEmptyAgentsParents(filePath, targetRoot) {
 }
 
 function removeLegacyAgentsFiles(migration, targetRoot) {
-  for (const operation of migration.legacyAgentsOperationsToRemove || []) {
-    const latestInspection = inspectLegacyAgentsOperation(
-      { targetRoot },
-      operation
+  // Load lazily: lifecycle also uses this migration during repair.
+  const { removeContainedPath } = require('../install-lifecycle');
+  return (migration.legacyAgentsOperationsToRemove || []).flatMap(operation => {
+    const latestInspection = inspectLegacyAgentsOperation({ targetRoot }, operation);
+    if (!latestInspection.removable) return [];
+    const removedPath = removeContainedPath(
+      operation.destinationPath, targetRoot, 'remove legacy managed .agents file',
+      { force: true, verifyQuarantined: quarantinedPath => {
+        const stat = fs.lstatSync(quarantinedPath);
+        return stat.isFile() && !stat.isSymbolicLink()
+          && crypto.createHash('sha256').update(fs.readFileSync(quarantinedPath)).digest('hex')
+            === operation.contentSha256.toLowerCase();
+      } }
     );
-    if (!latestInspection.removable) {
-      continue;
-    }
-    fs.rmSync(operation.destinationPath, { force: true });
-    cleanupEmptyAgentsParents(operation.destinationPath, targetRoot);
-  }
+    if (!removedPath) return [];
+    cleanupEmptyAgentsParents(removedPath, targetRoot);
+    return [removedPath];
+  });
 }
 
 module.exports = {

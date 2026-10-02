@@ -185,15 +185,18 @@ function runCatalogValidator(overrides = {}) {
   const argvPreamble = argv.map(arg => `process.argv.push(${JSON.stringify(arg)});`).join('\n');
   source = `${argvPreamble}\n${source}`;
 
+  const resolvedRoot = overrides.ROOT || repoRoot;
   const resolvedOverrides = {
-    ROOT: repoRoot,
-    README_PATH: path.join(repoRoot, 'README.md'),
-    AGENTS_PATH: path.join(repoRoot, 'AGENTS.md'),
-    README_ZH_CN_PATH: path.join(repoRoot, 'README.zh-CN.md'),
-    DOCS_ZH_CN_README_PATH: path.join(repoRoot, 'docs', 'zh-CN', 'README.md'),
-    DOCS_ZH_CN_AGENTS_PATH: path.join(repoRoot, 'docs', 'zh-CN', 'AGENTS.md'),
-    PLUGIN_JSON_PATH: path.join(repoRoot, '.claude-plugin', 'plugin.json'),
-    MARKETPLACE_JSON_PATH: path.join(repoRoot, '.claude-plugin', 'marketplace.json'),
+    ROOT: resolvedRoot,
+    README_PATH: path.join(resolvedRoot, 'README.md'),
+    AGENTS_PATH: path.join(resolvedRoot, 'AGENTS.md'),
+    README_ZH_CN_PATH: path.join(resolvedRoot, 'README.zh-CN.md'),
+    DOCS_ZH_CN_README_PATH: path.join(resolvedRoot, 'docs', 'zh-CN', 'README.md'),
+    DOCS_ZH_CN_AGENTS_PATH: path.join(resolvedRoot, 'docs', 'zh-CN', 'AGENTS.md'),
+    PLUGIN_JSON_PATH: path.join(resolvedRoot, '.claude-plugin', 'plugin.json'),
+    MARKETPLACE_JSON_PATH: path.join(resolvedRoot, '.claude-plugin', 'marketplace.json'),
+    SOUL_PATH: path.join(resolvedRoot, 'SOUL.md'),
+    GEMINI_PATH: path.join(resolvedRoot, '.gemini', 'GEMINI.md'),
     ...overrides,
   };
 
@@ -279,6 +282,7 @@ function writeCatalogFixture(testDir, options = {}) {
     ],
     pluginCounts = { agents: 1, skills: 1, commands: 1 },
     marketplaceCounts = { agents: 1, skills: 1, commands: 1 },
+    crossHarnessCounts = { agents: 1, skills: 1, commands: 1 },
   } = options;
 
   const readmePath = path.join(testDir, 'README.md');
@@ -288,12 +292,15 @@ function writeCatalogFixture(testDir, options = {}) {
   const zhAgentsPath = path.join(testDir, 'docs', 'zh-CN', 'AGENTS.md');
   const pluginJsonPath = path.join(testDir, '.claude-plugin', 'plugin.json');
   const marketplaceJsonPath = path.join(testDir, '.claude-plugin', 'marketplace.json');
+  const soulPath = path.join(testDir, 'SOUL.md');
+  const geminiPath = path.join(testDir, '.gemini', 'GEMINI.md');
 
   fs.mkdirSync(path.join(testDir, 'agents'), { recursive: true });
   fs.mkdirSync(path.join(testDir, 'commands'), { recursive: true });
   fs.mkdirSync(path.join(testDir, 'skills', 'demo-skill'), { recursive: true });
   fs.mkdirSync(path.join(testDir, 'docs', 'zh-CN'), { recursive: true });
   fs.mkdirSync(path.join(testDir, '.claude-plugin'), { recursive: true });
+  fs.mkdirSync(path.join(testDir, '.gemini'), { recursive: true });
 
   fs.writeFileSync(path.join(testDir, 'agents', 'planner.md'), '---\nmodel: sonnet\ntools: Read\n---\n# Planner');
   fs.writeFileSync(path.join(testDir, 'commands', 'plan.md'), '---\ndescription: Plan\n---\n# Plan');
@@ -314,8 +321,16 @@ function writeCatalogFixture(testDir, options = {}) {
       description: `Marketplace plugin — ${marketplaceCounts.agents} agents, ${marketplaceCounts.skills} skills, ${marketplaceCounts.commands} legacy command shims`,
     }],
   }, null, 2));
+  fs.writeFileSync(
+    soulPath,
+    `ECC is a production-ready AI coding plugin with ${crossHarnessCounts.agents} specialized agents, ${crossHarnessCounts.skills} skills, ${crossHarnessCounts.commands} commands, and automated hook workflows.\n`
+  );
+  fs.writeFileSync(
+    geminiPath,
+    `ECC is a cross-harness coding system with ${crossHarnessCounts.agents} specialized agents, ${crossHarnessCounts.skills} skills, and ${crossHarnessCounts.commands} commands.\n`
+  );
 
-  return { readmePath, agentsPath, zhRootReadmePath, zhDocsReadmePath, zhAgentsPath, pluginJsonPath, marketplaceJsonPath };
+  return { readmePath, agentsPath, zhRootReadmePath, zhDocsReadmePath, zhAgentsPath, pluginJsonPath, marketplaceJsonPath, soulPath, geminiPath };
 }
 
 function runTests() {
@@ -446,6 +461,110 @@ function runTests() {
   })) passed++; else failed++;
 
   // ==========================================
+  // check-hooks-schema-keys.js
+  // ==========================================
+  console.log('\ncheck-hooks-schema-keys.js:');
+
+  if (test('passes on real project hooks configs', () => {
+    const result = runValidator('check-hooks-schema-keys');
+    assert.strictEqual(result.code, 0, `Should pass, got stderr: ${result.stderr}`);
+    assert.ok(result.stdout.includes('Checked 2 hooks config(s)'), 'Should report both configs checked');
+  })) passed++; else failed++;
+
+  if (test('exits 0 when hooks.json does not exist', () => {
+    const result = runValidatorWithDir('check-hooks-schema-keys', 'HOOKS_FILE', '/nonexistent/hooks.json');
+    assert.strictEqual(result.code, 0, 'Should skip when no hooks.json');
+    assert.ok(result.stdout.includes('skipping'), 'Should say skipping');
+  })) passed++; else failed++;
+
+  if (test('fails on root $schema key', () => {
+    const testDir = createTestDir();
+    const hooksFile = path.join(testDir, 'hooks.json');
+    fs.writeFileSync(hooksFile, JSON.stringify({
+      $schema: '../schemas/hooks.schema.json',
+      hooks: {}
+    }));
+
+    const result = runValidatorWithDir('check-hooks-schema-keys', 'HOOKS_FILE', hooksFile);
+    assert.strictEqual(result.code, 1, 'Should fail on root $schema');
+    assert.ok(result.stderr.includes('"$schema"'), 'Should name the offending key');
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('fails on group id and description keys', () => {
+    const testDir = createTestDir();
+    const hooksFile = path.join(testDir, 'hooks.json');
+    fs.writeFileSync(hooksFile, JSON.stringify({
+      hooks: {
+        PreToolUse: [{
+          id: 'test:group',
+          description: 'metadata that belongs in the sidecar',
+          matcher: 'Bash',
+          hooks: [{ type: 'command', command: 'echo hi' }]
+        }]
+      }
+    }));
+
+    const result = runValidatorWithDir('check-hooks-schema-keys', 'HOOKS_FILE', hooksFile);
+    assert.strictEqual(result.code, 1, 'Should fail on group id/description');
+    assert.ok(result.stderr.includes('"id"'), 'Should name id');
+    assert.ok(result.stderr.includes('"description"'), 'Should name description');
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('fails on unknown handler key', () => {
+    const testDir = createTestDir();
+    const hooksFile = path.join(testDir, 'hooks.json');
+    fs.writeFileSync(hooksFile, JSON.stringify({
+      hooks: {
+        Stop: [{ hooks: [{ type: 'command', command: 'echo hi', label: 'not a loader key' }] }]
+      }
+    }));
+
+    const result = runValidatorWithDir('check-hooks-schema-keys', 'HOOKS_FILE', hooksFile);
+    assert.strictEqual(result.code, 1, 'Should fail on unknown handler key');
+    assert.ok(result.stderr.includes('"label"'), 'Should name the offending handler key');
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('fails on codex-hooks.json root $schema key', () => {
+    const testDir = createTestDir();
+    const hooksFile = path.join(testDir, 'codex-hooks.json');
+    fs.writeFileSync(hooksFile, JSON.stringify({
+      $schema: '../schemas/hooks.schema.json',
+      description: 'codex projection',
+      hooks: {
+        SessionStart: [{ id: 'session:start', matcher: '.*', hooks: [{ type: 'command', command: 'echo hi' }] }]
+      }
+    }));
+
+    const result = runValidatorWithDir('check-hooks-schema-keys', 'CODEX_HOOKS_FILE', hooksFile);
+    assert.strictEqual(result.code, 1, 'Should fail on codex root $schema');
+    assert.ok(result.stderr.includes('"$schema"'), 'Should name the offending key');
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('accepts codex documented keys including group id and root description', () => {
+    const testDir = createTestDir();
+    const hooksFile = path.join(testDir, 'codex-hooks.json');
+    fs.writeFileSync(hooksFile, JSON.stringify({
+      description: 'codex projection',
+      hooks: {
+        SessionStart: [{
+          id: 'session:start',
+          description: 'pinned by plugin-manifest test',
+          matcher: '.*',
+          hooks: [{ type: 'command', command: 'echo hi', timeout: 5 }]
+        }]
+      }
+    }));
+
+    const result = runValidatorWithDir('check-hooks-schema-keys', 'CODEX_HOOKS_FILE', hooksFile);
+    assert.strictEqual(result.code, 0, `Should pass, got stderr: ${result.stderr}`);
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  // ==========================================
   // catalog.js
   // ==========================================
   console.log('\ncatalog.js:');
@@ -501,6 +620,42 @@ function runTests() {
 
     assert.strictEqual(result.code, 1, 'Should fail when catalog counts drift');
     assert.ok((result.stdout + result.stderr).includes('Documentation count mismatches found:'), 'Should report mismatches');
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('fails when cross-harness identity counts drift', () => {
+    const testDir = createTestDir();
+    const {
+      readmePath,
+      agentsPath,
+      soulPath,
+      geminiPath,
+      zhRootReadmePath,
+      zhDocsReadmePath,
+      zhAgentsPath,
+      pluginJsonPath,
+      marketplaceJsonPath,
+    } = writeCatalogFixture(testDir, {
+      crossHarnessCounts: { agents: 9, skills: 8, commands: 7 },
+    });
+
+    const result = runCatalogValidator({
+      ROOT: testDir,
+      README_PATH: readmePath,
+      AGENTS_PATH: agentsPath,
+      SOUL_PATH: soulPath,
+      GEMINI_PATH: geminiPath,
+      README_ZH_CN_PATH: zhRootReadmePath,
+      DOCS_ZH_CN_README_PATH: zhDocsReadmePath,
+      DOCS_ZH_CN_AGENTS_PATH: zhAgentsPath,
+      PLUGIN_JSON_PATH: pluginJsonPath,
+      MARKETPLACE_JSON_PATH: marketplaceJsonPath,
+    });
+
+    assert.strictEqual(result.code, 1, 'Should fail when cross-harness counts drift');
+    const output = result.stdout + result.stderr;
+    assert.ok(output.includes('SOUL.md'), 'Should report SOUL.md mismatches');
+    assert.ok(output.includes('.gemini/GEMINI.md'), 'Should report GEMINI.md mismatches');
     cleanupTestDir(testDir);
   })) passed++; else failed++;
 
@@ -573,6 +728,8 @@ function runTests() {
     const {
       readmePath,
       agentsPath,
+      soulPath,
+      geminiPath,
       zhRootReadmePath,
       zhDocsReadmePath,
       zhAgentsPath,
@@ -590,6 +747,7 @@ function runTests() {
       zhAgentsSummaryCounts: { agents: 14, skills: 14, commands: 14 },
       pluginCounts: { agents: 18, skills: 18, commands: 18 },
       marketplaceCounts: { agents: 19, skills: 19, commands: 19 },
+      crossHarnessCounts: { agents: 18, skills: 18, commands: 18 },
       zhAgentsStructureLines: [
         'agents/          — 15 个专业子代理',
         'skills/          — 16 个工作流技能和领域知识',
@@ -607,6 +765,8 @@ function runTests() {
       DOCS_ZH_CN_AGENTS_PATH: zhAgentsPath,
       PLUGIN_JSON_PATH: pluginJsonPath,
       MARKETPLACE_JSON_PATH: marketplaceJsonPath,
+      SOUL_PATH: soulPath,
+      GEMINI_PATH: geminiPath,
     });
 
     assert.strictEqual(result.code, 0, `Should sync and pass, got stderr: ${result.stderr}`);
@@ -636,6 +796,10 @@ function runTests() {
     assert.ok(zhAgentsDoc.includes('commands/        — 1 个斜杠命令'), 'Should sync docs/zh-CN/AGENTS structure');
     assert.ok(pluginJson.includes('1 agents, 1 skills, 1 legacy command shims'), 'Should sync plugin manifest catalog description');
     assert.ok(marketplaceJson.includes('1 agents, 1 skills, 1 legacy command shims'), 'Should sync marketplace plugin catalog description');
+    const soul = fs.readFileSync(soulPath, 'utf8');
+    const gemini = fs.readFileSync(geminiPath, 'utf8');
+    assert.ok(soul.includes('with 1 specialized agents, 1 skills, 1 commands'), 'Should sync SOUL.md catalog summary');
+    assert.ok(gemini.includes('with 1 specialized agents, 1 skills, and 1 commands'), 'Should sync .gemini/GEMINI.md catalog summary');
 
     cleanupTestDir(testDir);
   })) passed++; else failed++;

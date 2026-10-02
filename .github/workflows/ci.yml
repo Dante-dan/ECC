@@ -20,7 +20,7 @@ jobs:
   test:
     name: Test (${{ matrix.os }}, Node ${{ matrix.node }}, ${{ matrix.pm }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     strategy:
       fail-fast: false
@@ -47,7 +47,7 @@ jobs:
       # Package manager setup
       - name: Setup pnpm
         if: matrix.pm == 'pnpm' && matrix.node != '18.x'
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           # Keep an explicit pnpm major because this repo's packageManager is Yarn.
           version: 10
@@ -239,6 +239,44 @@ jobs:
         run: node scripts/ci/validate-no-personal-paths.js
         continue-on-error: false
 
+  pi-core:
+    name: Pi Core Profile
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20.x'
+
+      # Rebuild runs frontmatter validation and the pi/core safety checks
+      # (no callable endpoints, no runtime downloads, no secrets, no absolute
+      # home paths, no symlinks, no duplicate skill names); the diff check
+      # proves the committed profile is up to date.
+      - name: Rebuild pi/core and verify it is up to date
+        run: |
+          node scripts/build-pi-core.js
+          git diff --exit-code pi/core
+
+      - name: Install Pi coding agent CLI
+        run: npm install --global --ignore-scripts --no-audit --no-fund @mariozechner/pi-coding-agent@0.73.1
+
+      # --extension only loads a package's pi.extensions entries; pi/core is a
+      # skills+prompts-only package, so the equivalent --skill/--prompt-template
+      # resource flags are used. The load-test script additionally asserts via
+      # RPC that every curated command actually loaded.
+      - name: Offline load test with the Pi CLI
+        run: |
+          PI_OFFLINE=1 pi --offline --mode rpc --no-session --no-context-files --no-extensions \
+            --skill pi/core/skills --prompt-template pi/core/commands </dev/null >/dev/null
+          node scripts/ci/pi-core-load-test.js
+
   python-tests:
     name: Python Lint, Type Check & Test
     runs-on: ubuntu-latest
@@ -266,6 +304,11 @@ jobs:
 
       - name: Run Python tests
         run: python -m pytest tests/test_*.py -m "not integration"
+
+      - name: Test minimum supported OpenAI SDK
+        run: |
+          python -m pip install 'openai==2.34.0'
+          python -m pytest tests/test_provider_tools.py tests/test_atlas_provider.py tests/test_astraflow_provider.py tests/test_resolver.py
 
   security:
     name: Security Scan
