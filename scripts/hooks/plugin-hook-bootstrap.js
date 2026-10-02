@@ -7,7 +7,7 @@ const { ensureAgentDataHomeEnv } = require('../lib/agent-data-home');
 const { normalizePluginRootForPlatform } = require('../lib/resolve-ecc-root');
 const { readStdinRaw: readBoundedStdin, resolveMaxStdin } = require('./hook-input');
 
-const SHELL_PROBE_TIMEOUT_MS = 5000;
+const SHELL_PROBE_TIMEOUT_MS = 2000;
 
 function writeStderr(stderr) {
   if ((typeof stderr === 'string' || Buffer.isBuffer(stderr)) && stderr.length > 0) {

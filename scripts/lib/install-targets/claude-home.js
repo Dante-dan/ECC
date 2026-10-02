@@ -4,6 +4,7 @@ const {
   HOME_INSTALL_EXCLUDED_SOURCE_PATHS,
   createInstallTargetAdapter,
   createRemappedOperation,
+  isForeignPlatformPath,
   normalizeRelativePath,
   planClaudeHooksOperations,
 } = require('./helpers');
@@ -67,9 +68,7 @@ module.exports = createInstallTargetAdapter({
     return modules.flatMap(module => {
       const paths = Array.isArray(module.paths) ? module.paths : [];
       return paths
-
-        .filter(adapter.supportsSourcePath)
-
+        .filter(p => !isForeignPlatformPath(p, adapter.target) && !adapter.excludesSourcePath(p))
         .flatMap(sourceRelativePath => {
           if (
             module.id === 'hooks-runtime'

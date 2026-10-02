@@ -23,10 +23,6 @@ const {
   prepareClaudeSkillMigration,
 } = require('./install/claude-skill-migration');
 const {
-  prepareLegacyAgentsMigration,
-  removeLegacyAgentsFiles,
-} = require('./install/legacy-agents-migration');
-const {
   getLegacyAntigravityLocation,
   inspectLegacyAntigravityState,
 } = require('./install/antigravity-legacy-migration');
@@ -560,7 +556,6 @@ function copyContainedFile(sourcePath, destinationPath, trustedRoot, action) {
 }
 
 function removeContainedPath(destinationPath, trustedRoot, action, options = {}) {
-  const { verifyQuarantined, ...removeOptions } = options;
   const existingDestination = getContainedExistingPath(
     destinationPath,
     trustedRoot,
@@ -593,8 +588,7 @@ function removeContainedPath(destinationPath, trustedRoot, action, options = {})
   }
 
   const quarantinedStat = fs.lstatSync(quarantinePath, { bigint: true });
-  if (!hasSameFileIdentity(expectedStat, quarantinedStat)
-    || (verifyQuarantined && !verifyQuarantined(quarantinePath))) {
+  if (!hasSameFileIdentity(expectedStat, quarantinedStat)) {
     try {
       fs.renameSync(quarantinePath, finalDestination);
       fs.rmdirSync(quarantineDir);
@@ -609,7 +603,7 @@ function removeContainedPath(destinationPath, trustedRoot, action, options = {})
   if (quarantinedStat.isDirectory() && !options.recursive) {
     fs.rmdirSync(quarantinePath);
   } else {
-    fs.rmSync(quarantinePath, removeOptions);
+    fs.rmSync(quarantinePath, options);
   }
   fs.rmdirSync(quarantineDir);
   return finalDestination;
@@ -1924,9 +1918,7 @@ function prepareRepairMigration(plan, record) {
     installStatePath: record.installStatePath,
     statePreview: buildAdapterDerivedStatePreview(plan.statePreview, record),
   };
-  const initialMigration = prepareLegacyAgentsMigration(
-    trustedPlan, prepareClaudeSkillMigration(trustedPlan)
-  );
+  const initialMigration = prepareClaudeSkillMigration(trustedPlan);
   const guardedMigration = record.adapter.id === 'codex-home'
     ? prepareUserOwnedFileGuard(trustedPlan, initialMigration)
     : initialMigration;
@@ -2210,16 +2202,10 @@ function repairInstalledStates(options = {}) {
         const legacyMigrationPaths = migration.legacyOperationsToRemove.map(
           operation => operation.destinationPath
         );
-        const legacyAgentsMigrationPaths = migration.legacyAgentsOperationsToRemove.map(
-          operation => operation.destinationPath
-        );
-        const hasLegacyAgentsStateMigration = migration.legacyAgentsOperationsToDetach.length > 0;
         const plannedRepairs = [...new Set([
           ...(needsOpencodeBuild ? [opencodeBuildRepairPath] : []),
           ...repairOperations.map(operation => operation.destinationPath),
           ...legacyMigrationPaths,
-          ...legacyAgentsMigrationPaths,
-          ...(hasLegacyAgentsStateMigration ? [record.installStatePath] : []),
         ])];
 
         if (options.dryRun) {
@@ -2235,8 +2221,7 @@ function repairInstalledStates(options = {}) {
           };
         }
 
-        const hasLegacyMigration = migration.legacyOperationsToRemove.length > 0
-          || hasLegacyAgentsStateMigration;
+        const hasLegacyMigration = migration.legacyOperationsToRemove.length > 0;
         const repairedPaths = needsOpencodeBuild ? [opencodeBuildRepairPath] : [];
         if (desiredPlan.target === 'opencode') {
           const { assertOpenCodeActivationUnchanged } = require('./install/apply');
@@ -2284,8 +2269,6 @@ function repairInstalledStates(options = {}) {
             }
           }
         }
-        const legacyAgentsRepairedPaths = removeLegacyAgentsFiles(migration, record.targetRoot);
-        const allRepairedPaths = [...repairedPaths, ...legacyAgentsRepairedPaths];
         const changedInstalledBytes = repairOperations.length > 0
           || needsOpencodeBuild
           || hasLegacyMigration;
@@ -2297,7 +2280,7 @@ function repairInstalledStates(options = {}) {
               source: { ...record.state.source },
             };
         assertOpenCodeRepairHookDeactivation(desiredPlan, { requireInactive: true });
-        writeRefreshedInstallState(record, statePreviewToWrite, allRepairedPaths);
+        writeRefreshedInstallState(record, statePreviewToWrite, repairedPaths);
 
         return {
           adapter: record.adapter,
@@ -2305,7 +2288,7 @@ function repairInstalledStates(options = {}) {
             ? 'repaired'
             : 'ok',
           installStatePath: record.installStatePath,
-          repairedPaths: allRepairedPaths,
+          repairedPaths,
           plannedRepairs: [],
           stateRefreshed: true,
           warnings: desiredPlan.warnings,
@@ -2323,7 +2306,6 @@ function repairInstalledStates(options = {}) {
       } finally {
         if (releaseSettingsLock) releaseSettingsLock();
       }
-
     };
     if (record.adapter.target !== 'opencode' || options.dryRun) return performRepair();
     let repairResult;
@@ -2346,7 +2328,6 @@ function repairInstalledStates(options = {}) {
         repairResult = performRepair(lease);
         return repairResult;
       });
-
     } catch (error) {
       if (repairResult?.status === 'error') {
         return { ...repairResult, releaseError: error.message };
@@ -2563,7 +2544,6 @@ module.exports = {
   buildDoctorReport,
   discoverInstalledStates,
   normalizeTargets,
-  removeContainedPath,
   repairInstalledStates,
   uninstallInstalledStates
 };
