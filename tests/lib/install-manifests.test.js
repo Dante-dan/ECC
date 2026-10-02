@@ -404,8 +404,8 @@ function runTests() {
     )), 'Should install the MLE workflow skill');
   })) passed++; else failed++;
 
-  if (test('resolves machine-learning component on JoyCode and Qwen targets', () => {
-    for (const target of ['joycode', 'qwen']) {
+  if (test('resolves machine-learning component across native and shared harness targets', () => {
+    for (const target of ['joycode', 'qwen', 'codex', 'opencode']) {
       const plan = resolveInstallPlan({
         includeComponentIds: ['capability:machine-learning'],
         target,
@@ -698,7 +698,7 @@ function runTests() {
     );
   })) passed++; else failed++;
 
-  if (test('keeps a requested target-capable module when a dependency does not support the target', () => {
+  if (test('skips required unsupported dependencies but permits explicitly optional ones', () => {
     const repoRoot = createTestRepo();
     try {
       writeJson(path.join(repoRoot, 'manifests', 'install-modules.json'), {
@@ -735,9 +735,36 @@ function runTests() {
         }
       });
 
-      const plan = resolveInstallPlan({ repoRoot, profileId: 'core', target: 'claude' });
-      assert.deepStrictEqual(plan.selectedModuleIds, ['parent']);
-      assert.deepStrictEqual(plan.skippedModuleIds, ['child']);
+      const requiredPlan = resolveInstallPlan({ repoRoot, profileId: 'core', target: 'claude' });
+      assert.deepStrictEqual(requiredPlan.selectedModuleIds, []);
+      assert.deepStrictEqual(requiredPlan.skippedModuleIds, ['parent', 'child']);
+
+      const modulesPath = path.join(repoRoot, 'manifests', 'install-modules.json');
+      const manifest = JSON.parse(fs.readFileSync(modulesPath, 'utf8'));
+      manifest.modules[0].optionalDependencies = ['child'];
+      writeJson(modulesPath, manifest);
+      const optionalPlan = resolveInstallPlan({ repoRoot, profileId: 'core', target: 'claude' });
+      assert.deepStrictEqual(optionalPlan.selectedModuleIds, ['parent']);
+      assert.deepStrictEqual(optionalPlan.skippedModuleIds, ['child']);
+
+      manifest.modules[1].targets = ['claude'];
+      writeJson(modulesPath, manifest);
+      const supportedPlan = resolveInstallPlan({ repoRoot, profileId: 'core', target: 'claude' });
+      assert.deepStrictEqual(supportedPlan.selectedModuleIds, ['parent', 'child']);
+
+      manifest.modules[1].dependencies = ['grandchild'];
+      manifest.modules.push({ ...manifest.modules[1], id: 'grandchild', targets: ['cursor'], dependencies: [] });
+      writeJson(modulesPath, manifest);
+      const transitivePlan = resolveInstallPlan({ repoRoot, profileId: 'core', target: 'claude' });
+      assert.deepStrictEqual(transitivePlan.selectedModuleIds, []);
+      assert.deepStrictEqual(transitivePlan.skippedModuleIds, ['parent', 'child', 'grandchild']);
+
+      manifest.modules[0].optionalDependencies = ['missing'];
+      writeJson(modulesPath, manifest);
+      assert.throws(
+        () => resolveInstallPlan({ repoRoot, profileId: 'core', target: 'claude' }),
+        /optionalDependencies must be an array of declared dependency ids/
+      );
     } finally {
       cleanupTestRepo(repoRoot);
     }

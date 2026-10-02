@@ -325,6 +325,12 @@ function loadInstallManifests(options = {}) {
 
   for (const module of modules) {
     readModuleTargetsOrThrow(module);
+    if (module.optionalDependencies !== undefined && (
+      !Array.isArray(module.optionalDependencies)
+      || module.optionalDependencies.some(id => !module.dependencies.includes(id))
+    )) {
+      throw new Error(`Install module ${module.id} optionalDependencies must be an array of declared dependency ids`);
+    }
   }
 
   const modulesById = new Map(modules.map(module => [module.id, module]));
@@ -633,7 +639,7 @@ function resolveInstallPlan(options = {}) {
   const visitingIds = new Set();
   const resolvedIds = new Set();
 
-  function resolveModule(moduleId, dependencyOf) {
+  function resolveModule(moduleId, dependencyOf, optional = false) {
     const module = manifests.modulesById.get(moduleId);
     if (!module) {
       throw new Error(`Unknown install module: ${moduleId}`);
@@ -657,12 +663,9 @@ function resolveInstallPlan(options = {}) {
 
     if (!supportsTarget) {
       if (dependencyOf) {
-        // A module that explicitly supports the selected target remains useful
-        // when one of its cross-harness dependencies does not. Treat that
-        // dependency as inapplicable for this target instead of dropping the
-        // target-capable root module with it.
+        // Only explicitly optional edges may be omitted for this target.
         skippedTargetIds.add(moduleId);
-        return true;
+        return optional;
       }
       skippedTargetIds.add(moduleId);
       return false;
@@ -680,13 +683,12 @@ function resolveInstallPlan(options = {}) {
     for (const dependencyId of module.dependencies) {
       const dependencyResolved = resolveModule(
         dependencyId,
-        moduleId
+        moduleId,
+        (module.optionalDependencies || []).includes(dependencyId)
       );
       if (!dependencyResolved) {
         visitingIds.delete(moduleId);
-        if (!dependencyOf) {
-          skippedTargetIds.add(moduleId);
-        }
+        skippedTargetIds.add(moduleId);
         return false;
       }
     }
