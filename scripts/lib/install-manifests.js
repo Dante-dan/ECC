@@ -694,12 +694,26 @@ function resolveInstallPlan(options = {}) {
     }
     visitingIds.delete(moduleId);
     resolvedIds.add(moduleId);
-    selectedIds.add(moduleId);
     return true;
   }
 
+  // Resolution may visit supported dependencies before a later required edge fails.
+  // Select only the closure of successful requests, so failed requests leave no
+  // orphan modules while shared dependencies remain available to successful ones.
+  function selectResolvedModule(moduleId) {
+    if (!resolvedIds.has(moduleId) || selectedIds.has(moduleId)) {
+      return;
+    }
+    selectedIds.add(moduleId);
+    for (const dependencyId of manifests.modulesById.get(moduleId).dependencies) {
+      selectResolvedModule(dependencyId);
+    }
+  }
+
   for (const moduleId of effectiveRequestedIds) {
-    resolveModule(moduleId, null);
+    if (resolveModule(moduleId, null)) {
+      selectResolvedModule(moduleId);
+    }
   }
 
   const selectedModules = manifests.modules.filter(module => selectedIds.has(module.id));

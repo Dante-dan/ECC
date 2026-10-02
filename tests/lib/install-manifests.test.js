@@ -770,6 +770,37 @@ function runTests() {
     }
   })) passed++; else failed++;
 
+  if (test('retains dependencies only when reachable from a successful request', () => {
+    const repoRoot = createTestRepo();
+    try {
+      const module = (id, dependencies = [], targets = ['claude']) => ({
+        id, kind: 'skills', description: id, paths: [id], targets,
+        dependencies, defaultInstall: false, cost: 'light', stability: 'stable'
+      });
+      writeJson(path.join(repoRoot, 'manifests', 'install-modules.json'), {
+        version: 1,
+        modules: [
+          module('parent', ['child', 'unsupported']),
+          module('child', ['leaf']),
+          module('leaf'),
+          module('unsupported', [], ['cursor']),
+          module('successful', ['child'])
+        ]
+      });
+      writeJson(path.join(repoRoot, 'manifests', 'install-profiles.json'), {
+        version: 1, profiles: { core: { description: 'Core', modules: ['parent'] } }
+      });
+      const plan = modules => resolveInstallPlan({ repoRoot, moduleIds: modules, target: 'claude' });
+      assert.deepStrictEqual(plan(['parent']).selectedModuleIds, []);
+      assert.deepStrictEqual(plan(['parent']).skippedModuleIds, ['parent', 'unsupported']);
+      assert.deepStrictEqual(plan(['parent', 'successful']).selectedModuleIds, ['child', 'leaf', 'successful']);
+      assert.deepStrictEqual(plan(['successful', 'parent']).selectedModuleIds, ['child', 'leaf', 'successful']);
+      assert.deepStrictEqual(plan(['parent', 'child']).selectedModuleIds, ['child', 'leaf']);
+    } finally {
+      cleanupTestRepo(repoRoot);
+    }
+  })) passed++; else failed++;
+
   if (test('rejects missing, malformed, and unsupported manifest fixtures', () => {
     const repoRoot = createTestRepo();
     try {
