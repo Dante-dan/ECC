@@ -35,8 +35,8 @@ truth and never create a second document merely to satisfy a default role.
 |---|---|
 | Adopt or maintain a constitution, map, status, and history spine | `living-docs-governance` |
 | Record a hard-to-reverse architecture decision | `architecture-decision-records` |
-| Preserve an executable regression for an important defect | `ai-regression-testing` |
-| Define a verifiable goal and feedback loop | `loop-design-check` |
+| Preserve an executable regression for an important defect | `ai-regression-testing` (install separately in standalone Pi core) |
+| Define a verifiable goal and feedback loop | `loop-design-check` (install separately in standalone Pi core) |
 | Check mapped roles, local links, ADR indexes, TEST-IDs, or possible orphan docs | Run the bundled read-only audit |
 
 If no row fits, explain the ownership ambiguity instead of combining several
