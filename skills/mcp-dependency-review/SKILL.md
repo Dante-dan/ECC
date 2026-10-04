@@ -33,7 +33,7 @@ Do not:
 
 ## Static Classification Rules
 
-For npm/npx-style package selectors, classify the package reference itself:
+For npm/npx-style package selectors, Python package selectors, and Docker image references, classify the direct reference:
 
 | Selector | Result | Why |
 | --- | --- | --- |
@@ -46,6 +46,20 @@ For npm/npx-style package selectors, classify the package reference itself:
 | `package@~1.2.0` | MEDIUM | Resolution can move within the range. |
 | wildcard / inequality / other range | MEDIUM | Selector permits more than one version. |
 | local path / script / unknown binary | REVIEW | Package-version drift rules do not establish its update behavior. |
+
+For Docker and Python references, apply these additional outcomes:
+
+| Selector | Result | Why |
+| --- | --- | --- |
+| Docker image pinned by `@sha256:DIGEST` | SAFE | A well-formed full SHA-256 digest fixes the direct image content, including when a tag is also present. |
+| Docker image with a tag or no tag and no digest | HIGH | All tags, including version-looking tags and the default `latest`, can move to different image content. |
+| Python exact version (`package==1.2.3` or `uvx package@1.2.3`) | SAFE | The direct version selector is exact; wildcard equality is not an exact pin. |
+| Python package without a version or `uvx package@latest` | HIGH | Future resolution can select different package code. |
+| Python version range or wildcard (`package>=1.2,<2`, `package~=1.2`, `package==1.*`) | MEDIUM | The selector permits more than one version. |
+| Python editable / direct URL / VCS reference | REVIEW | These forms need separate source and integrity review; do not infer safety from a URL or commit-looking suffix. |
+| Unsupported or ambiguous Docker / Python invocation or selector | REVIEW | Record the invocation even when its selected reference cannot be isolated confidently. |
+
+For every runner, `SAFE` applies only to the direct selector or image digest. It does not establish package integrity, provenance, or full transitive dependency reproducibility; it is not a complete security verdict.
 
 Treat `-y` / `--yes` only as context. It suppresses interactive confirmation; it is not a vulnerability by itself.
 
@@ -72,6 +86,12 @@ Then perform bounded discovery inside the requested repository/workspace for equ
 Read JSON or configuration text and identify each configured MCP server. For package-runner invocations such as `npx`, `npm exec`, `bunx`, `bun x`, `pnpm dlx`, or `yarn dlx`, isolate every package selector from command-line flags.
 
 Package-valued flags count as package selectors too. For example, in `npx --package ecc-universal ecc`, classify `ecc-universal` as the package selector and treat `ecc` as the executable. If multiple package-valued flags are present, review every supplied package selector.
+
+For `docker run` and `docker container run`, isolate the image separately from Docker options and the in-container command. For example, `docker run --rm -i example/server:1.2.3 serve` selects `example/server:1.2.3`, not `serve`. Account for option values before the image; do not treat a volume, environment value, or option argument as the image. Inspect an explicit image field in equivalent configuration as an image reference too.
+
+For `uvx` (including `uv tool run`), classify the package from `--from`; for `pipx run`, classify the package from `--spec`. For example, `uvx --from example-tool==1.2.3 example-command` and `pipx run --spec example-tool==1.2.3 example-command` both select `example-tool==1.2.3`; `example-command` is the executable. Accept both separated flag values and `--from=SPEC` / `--spec=SPEC` forms. Without those flags, isolate the tool/package selector (`uvx example-tool@1.2.3` or `pipx run example-tool`) from subsequent executable arguments. Review additional package-bearing options such as uv's `--with` separately when their syntax is clear.
+
+If the invocation, option boundaries, or selector syntax is unsupported or ambiguous, report REVIEW and never omit the configured server, guess a selected package, or execute the command to resolve uncertainty. Editable installs, direct URLs, VCS sources, shell wrappers, and uncertain executable-to-package mappings require REVIEW.
 
 Never execute the discovered command to learn what it does.
 

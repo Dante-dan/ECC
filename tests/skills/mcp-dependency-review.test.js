@@ -59,6 +59,29 @@ test('classifies mutable selectors without treating them as compromise evidence'
   assert.match(canonical, /not breach claims/i);
   assert.match(canonical, /describe dependency mutability alone as proof of a vulnerability, compromise, or malicious package/i);
 });
+test('covers Docker and Python selectors without silently skipping ambiguous invocations', () => {
+  const rows = canonical.split('\n').filter(line => line.startsWith('| '));
+  const cases = [
+    ['Docker image pinned by', 'SAFE'],
+    ['Docker image with a tag or no tag and no digest', 'HIGH'],
+    ['Python exact version', 'SAFE'],
+    ['Python package without a version', 'HIGH'],
+    ['Python version range or wildcard', 'MEDIUM'],
+    ['Python editable / direct URL / VCS reference', 'REVIEW'],
+  ];
+  for (const [selector, result] of cases) {
+    assert.ok(rows.some(row => row.includes(selector) && row.includes(`| ${result} |`)),
+      `${selector} must have an explicit ${result} classification`);
+  }
+  assert.match(canonical, /`docker run`.*`docker container run`/);
+  assert.match(canonical, /image separately from Docker options and the in-container command/i);
+  assert.match(canonical, /`uvx --from example-tool==1\.2\.3 example-command`/);
+  assert.match(canonical, /`pipx run --spec example-tool==1\.2\.3 example-command`/);
+  assert.match(canonical, /`--from=SPEC`.*`--spec=SPEC`/);
+  assert.match(canonical, /unsupported or ambiguous.*REVIEW.*never omit/i);
+  assert.match(canonical, /package integrity, provenance, or full transitive dependency reproducibility/i);
+});
+
 test('does not recommend substituting an arbitrary current latest version', () => {
   assert.match(canonical, /Do \*\*not\*\* invent a pin by substituting today's latest registry version/i);
   assert.match(canonical, /pin a version the team has reviewed/i);
