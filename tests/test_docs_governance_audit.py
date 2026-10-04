@@ -243,6 +243,7 @@ def test_artifact_scope_handles_many_unclosed_inline_links_linearly(
     assert result.returncode == 0, result.stdout
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("prefix", ("<unterminated ", "unterminated "))
 def test_artifact_scope_checks_link_after_unclosed_destination(
     project: Path, prefix: str
@@ -343,6 +344,7 @@ def test_artifact_scope_checks_shortcut_reference_followed_by_colon(
     assert "Broken Markdown link: 'index.md' -> 'missing-guide.md'" in result.stdout
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("target_line", ("  missing-guide.md", "missing-guide.md"))
 def test_artifact_scope_checks_continuation_line_reference_target(
     project: Path, target_line: str
