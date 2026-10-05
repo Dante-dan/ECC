@@ -7,12 +7,19 @@ const { performance } = require('perf_hooks');
 const WAIT_BUFFER = new Int32Array(new SharedArrayBuffer(4));
 const DEFAULT_TIMEOUT_MS = 5000;
 
-// Cleanup must never replace an arbitrary primary throw (including frozen errors,
-// primitives, or objects with throwing property traps). Diagnostics are best effort.
-function attachCleanupError(primary, name, secondary) {
+const CLEANUP_ERRORS = new WeakMap();
+const EMPTY_CLEANUP_ERRORS = Object.freeze({});
+
+// Preserve the original throw's identity and properties, including frozen errors
+// and proxies. Primitive throws cannot own diagnostics and are left unchanged.
+function recordCleanupError(primary, name, secondary) {
   if (primary === null || (typeof primary !== 'object' && typeof primary !== 'function')) return;
-  try { Object.defineProperty(primary, name, { value: secondary, configurable: true }); }
-  catch (_error) { /* Preserve the primary when it cannot accept diagnostics. */ }
+  CLEANUP_ERRORS.set(primary, Object.freeze({ ...getCleanupErrors(primary), [name]: secondary }));
+}
+
+// Frozen snapshots are local to this module instance; they do not cross workers.
+function getCleanupErrors(primary) {
+  return CLEANUP_ERRORS.get(primary) || EMPTY_CLEANUP_ERRORS;
 }
 
 function hasCode(error, code) {
@@ -53,7 +60,7 @@ function releaseOwnedLock(lockPath, descriptor, identity) {
     fs.closeSync(descriptor); // Exactly one attempt, even after a release failure.
   } catch (error) {
     closeFailed = true;
-    if (failed) attachCleanupError(primary, 'closeError', error);
+    if (failed) recordCleanupError(primary, 'closeError', error);
     else { failed = true; primary = error; }
   }
   if (pendingDelete && !closeFailed) {
@@ -100,7 +107,7 @@ function acquireLock(dbPath, timeoutMs) {
         if (identity) releaseOwnedLock(lockPath, descriptor, identity);
         else fs.closeSync(descriptor);
       } catch (releaseError) {
-        attachCleanupError(error, 'releaseError', releaseError);
+        recordCleanupError(error, 'releaseError', releaseError);
       }
       throw error;
     }
@@ -127,10 +134,10 @@ function withStateStoreLock(dbPath, callback, { timeoutMs = DEFAULT_TIMEOUT_MS }
     release();
   } catch (releaseError) {
     if (!failed) throw releaseError;
-    attachCleanupError(primaryError, 'releaseError', releaseError);
+    recordCleanupError(primaryError, 'releaseError', releaseError);
   }
   if (failed) throw primaryError;
   return result;
 }
 
-module.exports = { withStateStoreLock, attachCleanupError };
+module.exports = { withStateStoreLock, recordCleanupError, getCleanupErrors };

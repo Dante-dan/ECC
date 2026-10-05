@@ -18,7 +18,7 @@ function loadPrivate(filename, overrides = {}, source = fs.readFileSync(filename
   return module.exports;
 }
 const lockModule = loadPrivate(LOCK, { fs });
-const { withStateStoreLock } = lockModule;
+const { withStateStoreLock, recordCleanupError, getCleanupErrors } = lockModule;
 // sql.js is only initialized by the original integration cases, never the pure mode.
 const { createStateStore } = loadPrivate(STORE, { fs, './file-lock': lockModule });
 
@@ -48,7 +48,8 @@ function lockFixture(overrides = {}, platform = 'linux', performance = require('
   }
   const lock = loadPrivate(LOCK, { fs: facade, os: { hostname: () => 'fixture' }, perf_hooks: { performance } }, undefined,
     { platform, pid: 7 });
-  return { ...state, calls, run: (callback, timeoutMs = 0) => lock.withStateStoreLock('synthetic.db', callback, { timeoutMs }) };
+  return { ...state, calls, getCleanupErrors: lock.getCleanupErrors,
+    run: (callback, timeoutMs = 0) => lock.withStateStoreLock('synthetic.db', callback, { timeoutMs }) };
 }
 
 async function runSynthetic(test) {
@@ -154,7 +155,7 @@ async function runSynthetic(test) {
     const result = thrownBy(() => fixture.run(() => {}));
     assert.ok(result.failed);
     assert.strictEqual(result.error, denied);
-    assert.strictEqual(result.error.closeError, cleanup);
+    assert.strictEqual(fixture.getCleanupErrors(result.error).closeError, cleanup);
     assert.deepStrictEqual(fixture.calls.slice(3), ['lstat', 'close']);
   });
   await test('initial missing lock is loss after descriptor closure', () => {
@@ -172,8 +173,11 @@ async function runSynthetic(test) {
     assert.strictEqual(result.error, denied);
     assert.deepStrictEqual(fixture.calls.slice(3), ['lstat', 'unlink', 'close']);
   });
+  const revoked = Proxy.revocable({}, {});
+  revoked.revoke();
   const primaries = [null, undefined, false, 0, '', 'primitive', Object.freeze(new Error('frozen')),
-    Object.defineProperty(new Error('setter'), 'releaseError', { set() { throw new Error('setter must not mask'); } })];
+    Object.defineProperty(new Error('setter'), 'releaseError', { set() { throw new Error('setter must not mask'); } }),
+    revoked.proxy];
   for (const [index, primary] of primaries.entries()) {
     for (const stage of ['callback', 'metadata', 'identity']) {
       await test(`arbitrary primary survives lock cleanup (${index}, ${stage})`, () => {
@@ -187,6 +191,10 @@ async function runSynthetic(test) {
         const result = thrownBy(() => fixture.run(() => { if (stage === 'callback') throw primary; assert.fail('callback must not run'); }));
         assert.ok(result.failed);
         assert.strictEqual(result.error, primary);
+        const diagnostics = fixture.getCleanupErrors(primary);
+        if (primary !== null && typeof primary === 'object') assert.strictEqual(diagnostics.releaseError, cleanup);
+        else assert.deepStrictEqual(diagnostics, {});
+        assert.ok(Object.isFrozen(diagnostics));
       });
     }
     for (const stage of ['migration', 'rollback']) {
@@ -197,8 +205,10 @@ async function runSynthetic(test) {
           run(sql) { if (sql === 'ROLLBACK') throw secondary; }
           close() { closes++; throw secondary; }
         } };
+        const cleanupLock = loadPrivate(LOCK);
         const api = loadPrivate(STORE, {
           'sql.js': async () => fakeSQL,
+          './file-lock': cleanupLock,
           './migrations': { applyMigrations() { if (stage === 'migration') throw primary; return []; } },
           './queries': { createQueryApi: () => ({}) },
         });
@@ -211,9 +221,64 @@ async function runSynthetic(test) {
         assert.ok(failed);
         assert.strictEqual(caught, primary);
         assert.strictEqual(closes, 1);
+        const diagnostics = cleanupLock.getCleanupErrors(primary);
+        if (primary !== null && typeof primary === 'object') {
+          assert.strictEqual(diagnostics.closeError, secondary);
+          if (stage === 'rollback') assert.strictEqual(diagnostics.rollbackError, secondary);
+        } else assert.deepStrictEqual(diagnostics, {});
+        assert.ok(Object.isFrozen(diagnostics));
       });
     }
   }
+  await test('cleanup diagnostics preserve caller descriptors without invoking accessors', () => {
+    let accesses = 0;
+    const primary = Object.defineProperty(new Error('operation failed'), 'releaseError', {
+      configurable: true,
+      enumerable: true,
+      get() { accesses++; throw new Error('getter must not run'); },
+      set() { accesses++; throw new Error('setter must not run'); },
+    });
+    const before = Object.getOwnPropertyDescriptors(primary);
+    const cleanup = new Error('unlink failed');
+    const fixture = lockFixture({ unlinkSync() { throw cleanup; } });
+    const result = thrownBy(() => fixture.run(() => { throw primary; }));
+    assert.ok(result.failed);
+    assert.strictEqual(result.error, primary);
+    assert.deepStrictEqual(Object.getOwnPropertyDescriptors(primary), before);
+    assert.strictEqual(accesses, 0);
+    assert.strictEqual(fixture.getCleanupErrors(primary).releaseError, cleanup);
+  });
+  await test('successive cleanup diagnostics are immutable snapshots isolated by primary', () => {
+    const primary = Object.freeze(new Error('primary'));
+    const other = () => {};
+    const closeError = new Error('close failed');
+    const rollbackError = new Error('rollback failed');
+    const untouched = getCleanupErrors(primary);
+    assert.deepStrictEqual(untouched, {});
+    recordCleanupError(primary, 'closeError', closeError);
+    const first = getCleanupErrors(primary);
+    recordCleanupError(primary, 'rollbackError', rollbackError);
+    const second = getCleanupErrors(primary);
+    assert.notStrictEqual(first, second);
+    assert.deepStrictEqual(untouched, {});
+    assert.deepStrictEqual(first, { closeError });
+    assert.deepStrictEqual(second, { closeError, rollbackError });
+    assert.ok(!Object.isFrozen(closeError));
+    assert.ok(!Object.isFrozen(rollbackError));
+    assert.ok([untouched, first, second].every(Object.isFrozen));
+    assert.throws(() => { first.closeError = rollbackError; }, TypeError);
+    recordCleanupError(primary, 'closeError', rollbackError);
+    const third = getCleanupErrors(primary);
+    assert.notStrictEqual(third, second);
+    assert.deepStrictEqual(second, { closeError, rollbackError });
+    assert.deepStrictEqual(third, { closeError: rollbackError, rollbackError });
+    assert.ok(Object.isFrozen(third));
+    assert.deepStrictEqual(getCleanupErrors(other), {});
+    recordCleanupError(other, 'releaseError', rollbackError);
+    assert.deepStrictEqual(getCleanupErrors(other), { releaseError: rollbackError });
+    assert.strictEqual(getCleanupErrors(primary), third);
+    assert.deepStrictEqual(Object.keys(primary), []);
+  });
   for (const stage of ['initialize', 'previous-close']) {
     for (const [index, primary] of [null, undefined, Object.freeze(new Error('reload primary'))].entries()) {
       await test(`reload closes its unadopted handle and preserves ${stage} failure (${index})`, () => {
@@ -503,7 +568,7 @@ async function run() {
     assert.throws(() => store._database.transaction(() => {
       store._database.exec('ROLLBACK');
       throw failure;
-    })(), error => error === failure && error.rollbackError instanceof Error);
+    })(), error => error === failure && getCleanupErrors(error).rollbackError instanceof Error);
     assert.throws(() => store.listWorkItems(), /closed/);
     store.close();
   });
@@ -545,7 +610,7 @@ async function run() {
     };
     try {
       assert.throws(() => withStateStoreLock(dbPath, () => { throw primary; }),
-        error => error === primary && error.releaseError === cleanup);
+        error => error === primary && getCleanupErrors(error).releaseError === cleanup);
     } finally {
       fs.unlinkSync = unlink;
       unlink(lock);

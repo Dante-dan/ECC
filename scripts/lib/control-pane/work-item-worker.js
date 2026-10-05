@@ -2,7 +2,7 @@
 
 const { parentPort, workerData } = require('worker_threads');
 const { createStateStore } = require('../state-store');
-const { attachCleanupError } = require('../state-store/file-lock');
+const { recordCleanupError } = require('../state-store/file-lock');
 const { claimWorkItem, moveWorkItem } = require('./work-item-mutations');
 
 /** Complete one board mutation away from the HTTP event loop, then close. */
@@ -18,7 +18,7 @@ async function mutate() {
   catch (error) { failed = true; primary = error; }
   try { store.close(); }
   catch (error) {
-    if (failed) attachCleanupError(primary, 'closeError', error);
+    if (failed) recordCleanupError(primary, 'closeError', error);
     else { failed = true; primary = error; }
   }
   if (failed) throw primary;

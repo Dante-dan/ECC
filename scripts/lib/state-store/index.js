@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 const initSqlJs = require('sql.js');
-const { withStateStoreLock, attachCleanupError } = require('./file-lock');
+const { withStateStoreLock, recordCleanupError } = require('./file-lock');
 
 const { applyMigrations, getAppliedMigrations } = require('./migrations');
 const { createQueryApi } = require('./queries');
@@ -229,7 +229,7 @@ function wrapSqlJsDatabase(SQL, dbPath) {
     } catch (error) {
       // The replacement is not adopted until both initialization and the old
       // handle's close succeed. Never reuse an uncertain previous handle.
-      try { latest.close(); } catch (closeError) { attachCleanupError(error, 'closeError', closeError); }
+      try { latest.close(); } catch (closeError) { recordCleanupError(error, 'closeError', closeError); }
       throw error;
     }
     rawDb = latest;
@@ -324,9 +324,9 @@ function wrapSqlJsDatabase(SQL, dbPath) {
       } catch (rollbackError) {
         // Never reuse an uncertain transaction, including an in-memory store.
         closed = true;
-        try { rawDb.close(); } catch (closeError) { attachCleanupError(error, 'closeError', closeError); }
+        try { rawDb.close(); } catch (closeError) { recordCleanupError(error, 'closeError', closeError); }
         rawDb = null;
-        attachCleanupError(error, 'rollbackError', rollbackError);
+        recordCleanupError(error, 'rollbackError', rollbackError);
       }
       dirty = previouslyDirty;
       throw error;
@@ -398,7 +398,7 @@ async function createStateStore(options = {}) {
   try {
     appliedMigrations = db.withSnapshot(() => applyMigrations(db));
   } catch (error) {
-    try { db.close(); } catch (closeError) { attachCleanupError(error, 'closeError', closeError); }
+    try { db.close(); } catch (closeError) { recordCleanupError(error, 'closeError', closeError); }
     throw error;
   }
   const queryApi = createQueryApi(db);
