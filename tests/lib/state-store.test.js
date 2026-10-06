@@ -364,6 +364,48 @@ async function runTests() {
     }
   })) passed += 1; else failed += 1;
 
+  if (await test('uses one persisted snapshot for each report and caches unchanged reads', async () => {
+    const dir = createTempDir('ecc-state-read-snapshot-');
+    const dbPath = path.join(dir, 'state.db');
+    const first = await createStateStore({ dbPath });
+    const second = await createStateStore({ dbPath });
+    const originalRead = fs.readFileSync;
+    let fileReads = 0;
+    try {
+      second.upsertSession({ id: 'one', adapterId: 'manual', harness: 'codex', state: 'active' });
+      let committed = false;
+      fs.readFileSync = function(target, ...args) {
+        const data = originalRead.call(this, target, ...args);
+        if (typeof target === 'number') {
+          fileReads += 1;
+          if (!committed) {
+            // Publish after the reader has obtained the old bytes but before
+            // the report's count and row queries. Both must use those bytes.
+            committed = true;
+            second.upsertSession({ id: 'two', adapterId: 'manual', harness: 'codex', state: 'active' });
+          }
+        }
+        return data;
+      };
+      const report = first.listRecentSessions();
+      assert.strictEqual(committed, true);
+      assert.strictEqual(report.totalCount, 1);
+      assert.strictEqual(report.sessions.length, 1);
+      const next = first.listRecentSessions();
+      assert.strictEqual(next.totalCount, 2);
+      assert.strictEqual(next.sessions.length, 2);
+      fileReads = 0;
+      first.getStatus();
+      first.getStatus();
+      assert.strictEqual(fileReads, 0, 'unchanged reports should reuse the loaded database');
+    } finally {
+      fs.readFileSync = originalRead;
+      first.close();
+      second.close();
+      cleanupTempDir(dir);
+    }
+  })) passed += 1; else failed += 1;
+
   if (await test('preserves all commits from concurrent processes including fresh migrations', async () => {
     const dir = createTempDir('ecc-state-processes-');
     const dbPath = path.join(dir, 'state.db');
@@ -381,19 +423,35 @@ async function runTests() {
         store.close();
       })().catch(error => { console.error(error); process.exitCode = 1; });
     `;
+    const children = [];
+    const completions = [];
     try {
       await Promise.all([0, 50, 100].map(offset => new Promise((resolve, reject) => {
         const child = spawn(process.execPath, ['-e', writer, modulePath, dbPath, String(offset)]);
+        children.push(child);
+        completions.push(new Promise(resolveClose => child.once('close', resolveClose)));
+        const deadline = setTimeout(() => {
+          child.kill('SIGKILL');
+          reject(new Error('writer timed out after 30000ms'));
+        }, 30000);
         let stderr = '';
         child.stderr.on('data', chunk => { stderr += chunk; });
         child.on('error', reject);
-        child.on('close', code => code === 0 ? resolve() : reject(new Error(stderr || 'writer exit ' + code)));
+        child.on('close', code => {
+          clearTimeout(deadline);
+          if (code === 0) resolve();
+          else reject(new Error(stderr || 'writer exit ' + code));
+        });
       })));
       const store = await createStateStore({ dbPath });
       assert.strictEqual(store._database.prepare('SELECT COUNT(*) AS count FROM concurrency_test').get().count, 150);
       assert.strictEqual(store.getAppliedMigrations().length, 2);
       store.close();
     } finally {
+      for (const child of children) {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      }
+      await Promise.all(completions);
       cleanupTempDir(dir);
     }
   })) passed += 1; else failed += 1;
