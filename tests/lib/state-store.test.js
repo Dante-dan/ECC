@@ -6,7 +6,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const {
   createStateStore,
@@ -336,6 +336,65 @@ async function runTests() {
       assert.strictEqual(secondMigrations[0].version, 1);
     } finally {
       cleanupTempDir(homeDir);
+    }
+  })) passed += 1; else failed += 1;
+
+  if (await test('refreshes stale handles and never republishes stale state on close', async () => {
+    const dir = createTempDir('ecc-state-handles-');
+    const dbPath = path.join(dir, 'state.db');
+    const first = await createStateStore({ dbPath });
+    const second = await createStateStore({ dbPath });
+    try {
+      first._database.exec('CREATE TABLE concurrency_test (id INTEGER PRIMARY KEY)');
+      first._database.exec('INSERT INTO concurrency_test VALUES (1)');
+      second._database.exec('INSERT INTO concurrency_test VALUES (2)');
+      assert.deepStrictEqual(first._database.prepare('SELECT id FROM concurrency_test ORDER BY id').all(), [{ id: 1 }, { id: 2 }]);
+      assert.throws(() => first._database.transaction(() => {
+        first._database.exec('INSERT INTO concurrency_test VALUES (3)');
+        throw new Error('rollback');
+      })(), /rollback/);
+      first._database.exec('INSERT INTO concurrency_test VALUES (4)');
+      first.close();
+      second.close();
+      const reopened = await createStateStore({ dbPath });
+      assert.strictEqual(reopened._database.prepare('SELECT COUNT(*) AS count FROM concurrency_test').get().count, 3);
+      reopened.close();
+    } finally {
+      cleanupTempDir(dir);
+    }
+  })) passed += 1; else failed += 1;
+
+  if (await test('preserves all commits from concurrent processes including fresh migrations', async () => {
+    const dir = createTempDir('ecc-state-processes-');
+    const dbPath = path.join(dir, 'state.db');
+    const modulePath = path.join(__dirname, '..', '..', 'scripts', 'lib', 'state-store');
+    const writer = `
+      const { createStateStore } = require(process.argv[1]);
+      (async () => {
+        const store = await createStateStore({ dbPath: process.argv[2] });
+        store._database.exec('CREATE TABLE IF NOT EXISTS concurrency_test (id INTEGER PRIMARY KEY)');
+        for (let i = 0; i < 50; i++) {
+          store._database.transaction(() => {
+            store._database.exec('INSERT INTO concurrency_test VALUES (' + (Number(process.argv[3]) + i) + ')');
+          })();
+        }
+        store.close();
+      })().catch(error => { console.error(error); process.exitCode = 1; });
+    `;
+    try {
+      await Promise.all([0, 50, 100].map(offset => new Promise((resolve, reject) => {
+        const child = spawn(process.execPath, ['-e', writer, modulePath, dbPath, String(offset)]);
+        let stderr = '';
+        child.stderr.on('data', chunk => { stderr += chunk; });
+        child.on('error', reject);
+        child.on('close', code => code === 0 ? resolve() : reject(new Error(stderr || 'writer exit ' + code)));
+      })));
+      const store = await createStateStore({ dbPath });
+      assert.strictEqual(store._database.prepare('SELECT COUNT(*) AS count FROM concurrency_test').get().count, 150);
+      assert.strictEqual(store.getAppliedMigrations().length, 2);
+      store.close();
+    } finally {
+      cleanupTempDir(dir);
     }
   })) passed += 1; else failed += 1;
 
