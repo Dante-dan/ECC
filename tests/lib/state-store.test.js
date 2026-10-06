@@ -562,6 +562,40 @@ async function runTests() {
     }
   })) passed += 1; else failed += 1;
 
+  if (await test('keeps foreign keys enabled after publishing and reusing a file-backed connection', async () => {
+    const testDir = createTempDir('ecc-state-foreign-keys-');
+    const dbPath = path.join(testDir, 'state.db');
+    let store;
+    try {
+      await seedStore(dbPath);
+      store = await createStateStore({ dbPath });
+      // Publish a valid write, then reuse that exact cached connection.
+      store.insertSkillRun({
+        id: 'valid-after-export', skillId: 'tdd-workflow', skillVersion: '1.0.0',
+        sessionId: 'session-active', taskDescription: 'Valid write', outcome: 'success',
+        createdAt: '2026-03-15T09:00:00.000Z',
+      });
+      assert.throws(() => store.insertSkillRun({
+        id: 'orphan-skill-run', skillId: 'tdd-workflow', skillVersion: '1.0.0',
+        sessionId: 'missing-session', taskDescription: 'Invalid write', outcome: 'success',
+        createdAt: '2026-03-15T09:01:00.000Z',
+      }), /FOREIGN KEY constraint failed/);
+      assert.throws(() => store.insertDecision({
+        id: 'orphan-decision', sessionId: 'missing-session', title: 'Invalid decision',
+        rationale: 'Must reject a missing session', alternatives: [], status: 'active',
+        createdAt: '2026-03-15T09:02:00.000Z',
+      }), /FOREIGN KEY constraint failed/);
+      store.close();
+      store = await createStateStore({ dbPath });
+      assert.deepStrictEqual(store._database.prepare('PRAGMA foreign_key_check').all(), []);
+      assert.strictEqual(store._database.prepare('SELECT COUNT(*) AS count FROM skill_runs WHERE id = ?').get('orphan-skill-run').count, 0);
+      assert.strictEqual(store._database.prepare('SELECT COUNT(*) AS count FROM decisions WHERE id = ?').get('orphan-decision').count, 0);
+    } finally {
+      if (store) store.close();
+      cleanupTempDir(testDir);
+    }
+  })) passed += 1; else failed += 1;
+
   if (await test('builds a status snapshot with active sessions, skill rates, install health, and pending governance', async () => {
     const testDir = createTempDir('ecc-state-db-');
     const dbPath = path.join(testDir, 'state.db');

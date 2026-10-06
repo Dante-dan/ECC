@@ -264,7 +264,14 @@ function wrapSqlJsDatabase(rawDb, dbPath, SQL) {
     }
     // If publication fails, a later operation must reload persisted state.
     loadedIdentity = undefined;
-    const data = rawDb.export();
+    let data;
+    try {
+      data = rawDb.export();
+    } finally {
+      // sql.js export closes and reopens the connection, resetting pragmas.
+      // Cached reuse must retain enforcement even if publication fails.
+      rawDb.run('PRAGMA foreign_keys = ON');
+    }
     const buffer = Buffer.from(data);
     writeDatabaseFileAtomic(dbPath, buffer);
     loadedIdentity = databaseIdentity(assertSafeDatabaseFile(dbPath));
