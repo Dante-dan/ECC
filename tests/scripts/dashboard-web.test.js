@@ -58,6 +58,68 @@ test('renderHTML emits executable scripts without syntax errors', () => {
   for (const script of scripts) new vm.Script(script[1]);
 });
 
+asyncTest('served activity UI shows HTTP failures as errors and preserves healthy empty and populated feeds', async () => {
+  const dir = createTempDir('ecc-activity-response-');
+  const savedDataHome = process.env.ECC_AGENT_DATA_HOME;
+  const originalClose = fs.closeSync;
+  try {
+    process.env.ECC_AGENT_DATA_HOME = dir;
+    const log = path.join(dir, 'metrics', 'tool-usage.jsonl');
+    writeFile(dir, 'metrics/tool-usage.jsonl', '');
+    const reported = [];
+    await withDashboardServer(async port => {
+      const page = await requestDashboard(port);
+      assert.strictEqual(page.statusCode, 200);
+      const script = [...page.body.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+        .find(match => match[1].includes('function renderActivity()'))[1];
+      async function renderFeed() {
+        let status;
+        let jsonReads = 0;
+        const html = await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('Activity UI did not render')), REQUEST_TIMEOUT_MS);
+          const panel = { set innerHTML(value) { clearTimeout(timeout); resolve(value); } };
+          const context = vm.createContext({
+            document: { getElementById: () => panel, createElement: () => ({}), head: { appendChild() {} } },
+            window: { showTab() {} }, setInterval() {}, clearInterval() {},
+            fetch: async url => {
+              const response = await fetch(`http://127.0.0.1:${port}${url}`);
+              status = response.status;
+              return { ok: response.ok, json() { jsonReads++; return response.json(); } };
+            },
+          });
+          new vm.Script(script).runInContext(context);
+          context.window.showTab('activity');
+        });
+        return { html, status, jsonReads };
+      }
+      // A descriptor-close failure escapes loadActivity's read catch and drives
+      // the real server's generic HTTP 500 response without leaking its detail.
+      fs.closeSync = fd => { originalClose(fd); throw new Error('private close detail'); };
+      const failed = await renderFeed();
+      fs.closeSync = originalClose;
+      assert.strictEqual(failed.status, 500);
+      assert.match(failed.html, /Could not load activity feed/);
+      assert.doesNotMatch(failed.html, /No recorded tool calls|private close detail/);
+      assert.strictEqual(failed.jsonReads, 0);
+      assert.strictEqual(reported.length, 1);
+      const empty = await renderFeed();
+      assert.strictEqual(empty.status, 200);
+      assert.match(empty.html, /No recorded tool calls yet/);
+      assert.strictEqual(empty.jsonReads, 1);
+      fs.writeFileSync(log, JSON.stringify({ session_id: 'response-fixture', tool_name: 'Read', input_summary: 'visible activity' }) + '\n');
+      const populated = await renderFeed();
+      assert.strictEqual(populated.status, 200);
+      assert.match(populated.html, /visible activity/);
+      assert.doesNotMatch(populated.html, /Could not load activity feed|No recorded tool calls/);
+    }, { reportError: (message, error) => reported.push({ message, error }) });
+  } finally {
+    fs.closeSync = originalClose;
+    if (savedDataHome === undefined) delete process.env.ECC_AGENT_DATA_HOME;
+    else process.env.ECC_AGENT_DATA_HOME = savedDataHome;
+    cleanup(dir);
+  }
+});
+
 test('activity loading bounds large logs and ignores malformed rows', () => {
   const { loadActivity } = require(SCRIPT);
   withTempDir('ecc-activity-', dir => {

@@ -856,7 +856,10 @@ handleRoute();
     var panel = document.getElementById('panel-activity');
     if (!panel) return;
     fetch('/api/activity')
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        if (!r.ok) throw new Error('Activity request failed');
+        return r.json();
+      })
       .then(function (data) {
         var entries = (data && data.entries) || [];
         var skillCount = entries.filter(function (e) { return e.tool_name === 'Skill'; }).length;

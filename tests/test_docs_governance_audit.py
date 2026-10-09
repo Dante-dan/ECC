@@ -882,3 +882,24 @@ def test_artifact_scope_resolves_escaped_bracket_and_apostrophe_filenames(
     (project / "index.md").write_text(link + "\n", encoding="utf-8")
     result = run_audit(project, "artifacts")
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("backslashes", range(5))
+@pytest.mark.parametrize("usage", ("[diagram]", "[diagram][]"))
+@pytest.mark.parametrize("scope", ("artifacts", "full"))
+def test_audit_checks_reference_usage_after_even_backslash_runs(
+    project: Path, backslashes: int, usage: str, scope: str
+) -> None:
+    (project / "index.md").write_text(
+        "\\" * backslashes + usage + "\n\n[diagram]: missing.png\n",
+        encoding="utf-8",
+    )
+    before = {path: path.read_bytes() for path in project.rglob("*") if path.is_file()}
+    result = run_audit(project, scope)
+    expected = 1 if backslashes % 2 == 0 else 0
+    assert result.returncode == expected, result.stdout + result.stderr
+    diagnostic = "Broken Markdown link: 'index.md' -> 'missing.png'"
+    assert (diagnostic in result.stdout) == (expected == 1), result.stdout
+    assert "Traceback" not in result.stderr
+    after = {path: path.read_bytes() for path in project.rglob("*") if path.is_file()}
+    assert after == before, "the actual audit CLI must not modify project files"

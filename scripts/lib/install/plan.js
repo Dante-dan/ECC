@@ -104,9 +104,10 @@ function buildCopyFileOperation({
   strategy,
   contentTransform,
 }) {
-  // Copilot's workflow reference transform is textual. Skill directories may
+  // Copilot's agent and workflow transforms are textual. Their directories may
   // also contain binary assets and executable helpers, which must keep bytes.
-  const applicableTransform = contentTransform === 'copilot-workflow-paths'
+  const applicableTransform = (contentTransform === 'copilot-workflow-paths'
+    || contentTransform === 'copilot-agent-frontmatter')
     && !/\.md$/i.test(sourceRelativePath) ? undefined : contentTransform;
   return {
     kind: 'copy-file',

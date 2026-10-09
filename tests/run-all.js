@@ -209,4 +209,4 @@ if (failedFiles.length > 0) {
 console.log('╚' + '═'.repeat(BOX_W) + '╝');
 console.log(`\nPassed: ${totalPassed}, Failed: ${totalFailed}`);
 
-process.exit(totalFailed > 0 ? 1 : 0);
+process.exitCode = totalFailed > 0 ? 1 : 0;

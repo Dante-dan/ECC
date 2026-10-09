@@ -2,8 +2,10 @@
 
 const assert = require('assert');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const vm = require('vm');
+const { spawnSync } = require('child_process');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'run-all.js'), 'utf8');
 
@@ -15,6 +17,7 @@ function run(result, filename = 'sample.test.js', actions = true) {
   const fakeProcess = {
     env: actions ? { GITHUB_ACTIONS: 'true' } : {},
     exit(code) { status = code; throw exit; },
+    set exitCode(code) { status = code; },
   };
   const fakeFs = {
     readdirSync: () => [{
@@ -140,6 +143,40 @@ const tests = [
     assert.deepStrictEqual(result.annotations, []);
     assert.ok(result.logs.includes('Error: local failure'));
   }],
+  ...[0, 1].map(fixtureFailures => [`piped runner flushes the full tail and summary with exit ${fixtureFailures}`, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ecc-runner-pipe-'));
+    try {
+      const testsDir = path.join(root, 'tests');
+      fs.mkdirSync(testsDir);
+      const runner = path.join(testsDir, 'run-all.js');
+      fs.writeFileSync(runner, source);
+      // Keep fixture stdout below the runner's default 1 MiB spawnSync ceiling,
+      // but above a pipe buffer so the runner must drain pending async writes.
+      const payloadBytes = 256 * 1024;
+      fs.writeFileSync(path.join(testsDir, 'large.test.js'), [
+        `console.log('x'.repeat(${payloadBytes}));`,
+        "console.log('FIXTURE_FULL_TAIL');",
+        `console.log('Passed: 1, Failed: ${fixtureFailures}');`,
+        `process.exitCode = ${fixtureFailures};`,
+      ].join('\n'));
+      const env = { ...process.env, PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH || ''}` };
+      delete env.ECC_TEST_SKIP;
+      delete env.ECC_TEST_ALLOW_FAILURES;
+      const result = spawnSync(process.execPath, [runner], {
+        encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env,
+        maxBuffer: 512 * 1024, timeout: 15000,
+      });
+      assert.ifError(result.error);
+      assert.strictEqual(result.status, fixtureFailures, result.stderr);
+      assert.ok(result.stdout.includes('x'.repeat(payloadBytes)), 'full bounded fixture payload must reach the pipe');
+      assert.match(result.stdout, /FIXTURE_FULL_TAIL/);
+      assert.match(result.stdout, /Final Results/);
+      assert.ok(result.stdout.trimEnd().endsWith(`Passed: 1, Failed: ${fixtureFailures}`));
+      assert.match(result.stdout, new RegExp(`Files: ${fixtureFailures ? '0 passed, 1 failed' : '1 passed, 0 failed'}`));
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }]),
 ];
 
 let failed = 0;

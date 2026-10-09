@@ -289,5 +289,40 @@ test('Copilot rewrites Markdown commands while preserving binary skill assets an
   }
 });
 
+test('Copilot installs non-Markdown agent assets byte-for-byte while adapting Markdown agents', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const { createManifestInstallPlan, applyInstallPlan } = require('../../scripts/lib/install-executor');
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ecc-copilot-agent-assets-'));
+  try {
+    const sourceRoot = path.join(temp, 'source');
+    fs.mkdirSync(path.join(sourceRoot, 'manifests'), { recursive: true });
+    fs.writeFileSync(path.join(sourceRoot, 'manifests', 'install-modules.json'), JSON.stringify({ version: 1, modules: [{
+      id: 'fixture', kind: 'agents', paths: ['agents'], targets: ['copilot'], dependencies: [],
+    }] }));
+    fs.writeFileSync(path.join(sourceRoot, 'manifests', 'install-profiles.json'), JSON.stringify({ version: 1, profiles: {} }));
+    const agentRoot = path.join(sourceRoot, 'agents');
+    fs.mkdirSync(path.join(agentRoot, 'assets'), { recursive: true });
+    const binary = Buffer.from([0, 255, 254, 128, 42]);
+    const helper = 'Run node scripts/setup-package-manager.js --detect\n';
+    fs.writeFileSync(path.join(agentRoot, 'assets', 'icon.png'), binary);
+    fs.writeFileSync(path.join(agentRoot, 'assets', 'helper.txt'), helper);
+    fs.writeFileSync(path.join(agentRoot, 'architect.MD'), CLAUDE_AGENT);
+    const plan = createManifestInstallPlan({ sourceRoot, target: 'copilot', moduleIds: ['fixture'], projectRoot: path.join(temp, 'project'), homeDir: path.join(temp, 'home'), env: {} });
+    applyInstallPlan(plan);
+    const installed = path.join(plan.targetRoot, 'agents');
+    assert.deepStrictEqual(fs.readFileSync(path.join(installed, 'assets', 'icon.png')), binary);
+    assert.strictEqual(fs.readFileSync(path.join(installed, 'assets', 'helper.txt'), 'utf8'), helper);
+    assert.strictEqual(fs.readFileSync(path.join(installed, 'architect.MD'), 'utf8'), adaptCopilotAgent(CLAUDE_AGENT, 'agents/architect.MD'));
+    for (const operation of plan.operations.filter(operation => operation.sourceRelativePath.includes('/assets/'))) {
+      assert.ok(!operation.contentTransform, operation.sourceRelativePath);
+    }
+    assert.strictEqual(fs.readFileSync(path.join(agentRoot, 'architect.MD'), 'utf8'), CLAUDE_AGENT);
+    assert.deepStrictEqual(fs.readFileSync(path.join(agentRoot, 'assets', 'icon.png')), binary);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
 console.log(`\nResults: Passed: ${passed}, Failed: ${failed}`);
 process.exit(failed === 0 ? 0 : 1);

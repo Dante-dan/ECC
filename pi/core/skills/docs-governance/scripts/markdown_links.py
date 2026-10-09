@@ -16,7 +16,7 @@ REFERENCE_DEFINITION_RE = re.compile(
     """
 )
 REFERENCE_USAGE_RE = re.compile(
-    r"(?<![\\])\[(?P<text>[^\]\n]+)\](?:\[(?P<label>[^\]\n]*)\])?"
+    r"(?<![\\])(?:\\\\)*\[(?P<text>[^\]\n]+)\](?:\[(?P<label>[^\]\n]*)\])?"
 )
 EXTERNAL_URI_RE = re.compile(
     r"^(?:[A-Za-z][A-Za-z0-9+.-]*://|(?:data|doi|geo|irc|magnet|mailto|news|sms|tel|urn):)",
