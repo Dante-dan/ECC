@@ -70,7 +70,7 @@ const python = findPython();
 
 test("accepts ordinary nested and look-alike workspace paths", () => {
   if (!python) return { skipped: "python >= 3.9 not available" };
-  const requests = ["reports/q1.txt", "console.txt", "CONFIG", "com10.txt", "nullable.md", ".env"];
+  const requests = ["reports/q1.txt", "reports\\q1.txt", "console.txt", "CONFIG", "com10.txt", "nullable.md", ".env"];
   const results = classify(python, requests);
   for (const requested of requests) {
     assert.strictEqual(results[requested], "accepted", `${requested} should be accepted`);
@@ -79,7 +79,7 @@ test("accepts ordinary nested and look-alike workspace paths", () => {
 
 test("rejects traversal and absolute paths", () => {
   if (!python) return { skipped: "python >= 3.9 not available" };
-  const requests = ["../outside.txt", "nested/../../outside.txt", path.resolve(os.tmpdir(), "abs.txt")];
+  const requests = ["../outside.txt", "nested/../../outside.txt", "..\\outside.txt", "nested\\..\\..\\outside.txt", "\\\\server\\share\\file.txt", path.resolve(os.tmpdir(), "abs.txt")];
   const results = classify(python, requests);
   for (const requested of requests) {
     assert.strictEqual(results[requested], "rejected", `${requested} should be rejected`);
@@ -102,11 +102,14 @@ test("rejects Windows reserved device names, trailing dots or spaces, and stream
     "COM¹",
     "lpt³.txt",
     "sub/CON/file.txt",
+    "sub\\CON\\file.txt",
     "notes.",
     "notes ",
     "dir./file.txt",
     "report.txt:ads",
     "report.txt::$DATA",
+    "C:\\Windows\\system32",
+    "C:/Windows/system32",
   ];
   const results = classify(python, requests);
   for (const requested of requests) {

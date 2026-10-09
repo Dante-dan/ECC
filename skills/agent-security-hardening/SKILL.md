@@ -97,7 +97,8 @@ WINDOWS_RESERVED_NAME = re.compile(
 )
 
 def workspace_path(workspace: Path, requested: str) -> Path:
-    relative = Path(requested)
+    # Treat both platform separators consistently before checking components.
+    relative = Path(requested.replace("\\", "/"))
     if relative.is_absolute() or ".." in relative.parts:
         raise ValueError("path must be workspace-relative")
     for part in relative.parts:
