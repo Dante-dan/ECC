@@ -480,7 +480,7 @@
     "ecc-universal": "scripts/ecc.js"
   },
   "scripts": {
-    "welcome": "echo '\\n  ecc-universal installed!\\n  Run: ecc typescript\\n  Compat: ecc-install typescript\\n  Docs: https://github.com/affaan-m/ECC\\n  Run or self-host any open-source model.\\n  Compute: It\u00f4 is the preferred compute sponsor \u2014 https://compute.itomarkets.com\\n  Any GPU provider works. This sponsorship link is passive: it does not invoke an RFQ, reserve capacity, provision compute, or configure serving.\\n  Separately, the opt-in ecc ito find bridge invokes the explicitly configured canonical It\u00f4 CLI and submits a live authenticated RFQ; it does not reserve capacity.\\n  Managed inference through It\u00f4 is not live yet.\\n'",
+    "welcome": "echo '\\n  ecc-universal installed!\\n  Run: ecc typescript\\n  Compat: ecc-install typescript\\n  Docs: https://github.com/affaan-m/ECC\\n  Run or self-host any open-source model.\\n  Compute: Itô is the preferred compute sponsor — https://compute.itomarkets.com\\n  Any GPU provider works. This sponsorship link is passive: it does not invoke an RFQ, reserve capacity, provision compute, or configure serving.\\n  Separately, the opt-in ecc ito find bridge invokes the explicitly configured canonical Itô CLI and submits a live authenticated RFQ; it does not reserve capacity.\\n  Managed inference through Itô is not live yet.\\n'",
     "catalog:check": "node scripts/ci/catalog.js --text",
     "context-profiles:check": "node scripts/ci/validate-context-profiles.js",
     "catalog:sync": "node scripts/ci/catalog.js --write --text",
@@ -532,11 +532,11 @@
   },
   "devDependencies": {
     "@eslint/js": "9.39.2",
-    "@opencode-ai/plugin": "1.18.25",
-    "@types/node": "26.4.0",
+    "@opencode-ai/plugin": "1.18.34",
+    "@types/node": "26.6.4",
     "c8": "11.0.0",
-    "eslint": "10.9.1",
-    "globals": "17.11.0",
+    "eslint": "10.11.0",
+    "globals": "17.13.0",
     "markdownlint-cli": "0.49.1",
     "typescript": "6.0.3"
   },
@@ -547,13 +547,15 @@
     "fast-uri": "3.1.7",
     "markdown-it": "14.3.0",
     "js-yaml": "4.3.2",
-    "@humanfs/node": "0.16.8"
+    "@humanfs/node": "0.16.8",
+    "brace-expansion": "5.0.12"
   },
   "resolutions": {
     "fast-uri": "3.1.7",
     "markdown-it": "14.3.0",
     "js-yaml": "4.3.2",
-    "@humanfs/node": "0.16.8"
+    "@humanfs/node": "0.16.8",
+    "brace-expansion": "5.0.12"
   },
   "packageManager": "yarn@4.9.2+sha512.1fc009bc09d13cfd0e19efa44cbfc2b9cf6ca61482725eb35bbc5e257e093ebf4130db6dfe15d604ff4b79efd8e1e8e99b25fa7d0a6197c9f9826358d4d65c3c"
 }
