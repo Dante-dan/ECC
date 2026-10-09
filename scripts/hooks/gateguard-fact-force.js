@@ -581,6 +581,10 @@ const DD_LAUNCHER_OPTIONS = {
   setsid: {
     values: new Set(), optional: new Set(),
     flags: new Set(['-c', '--ctty', '-f', '--fork', '-w', '--wait'])
+  },
+  taskset: {
+    values: new Set(), optional: new Set(),
+    flags: new Set(['-a', '--all-tasks', '-c', '--cpu-list'])
   }
 };
 
@@ -633,8 +637,9 @@ function ddLauncherCommandIndex(argv, index, name) {
     }
     index += consumesNext ? 2 : 1;
   }
-  // timeout's duration is data, followed by exactly one executable position.
-  return name === 'timeout' ? index + 1 : index;
+  // timeout's duration and taskset's mask or CPU list are data, followed by
+  // exactly one executable position.
+  return name === 'timeout' || name === 'taskset' ? index + 1 : index;
 }
 
 /**
@@ -768,6 +773,30 @@ function unwrapLeadWrappers(tokens, allowShellBuiltins = true, allowDdLaunchers 
 }
 
 /**
+ * The command lines `su` may run through the target user's shell: the value of
+ * every `-c`/`--command`, or of a short-option cluster ending in `c` (`-lc`).
+ * `su` runs only the last one, so each is checked rather than guessing which
+ * wins. `su` passes the arguments after `--` to that shell, which runs a `-c`
+ * there too, so the scan does not stop at `--`.
+ *
+ * @param {string[]} argv command argv starting at `su`
+ * @returns {string[]}
+ */
+function suCommandLines(argv) {
+  const commandLines = [];
+  for (let i = 1; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg.startsWith('--command=')) {
+      commandLines.push(arg.slice('--command='.length));
+    } else if ((arg === '--command' || /^-[A-Za-z]*c$/.test(arg)) && i + 1 < argv.length) {
+      commandLines.push(argv[i + 1]);
+      i += 1;
+    }
+  }
+  return commandLines;
+}
+
+/**
  * Detect destructive SQL passed as (possibly quoted) arguments to a known
  * SQL client. Operates on dequoted tokens from `quoteAwareSegments`, so
  * `psql -c "drop table users"` joins back to matchable text.
@@ -787,12 +816,15 @@ function isDestructiveSqlClient(tokens) {
  * separators, quoted `find -exec`, and `sh -c`/`bash -c` wrappers that evade
  * the quote-stripping path (GHSA-4v57-ph3x-gf55).
  *
+ * Past the recursion limit the nested command is not visible, so the check
+ * fails closed: a guard that allowed it would be bypassed by one more level.
+ *
  * @param {string} raw
  * @param {number} [depth] recursion guard for shell -c wrappers
  * @returns {boolean}
  */
 function isDestructiveQuoteAware(raw, depth = 0) {
-  if (depth > 4) return false;
+  if (depth > 4) return true;
   // The outer command was preprocessed already; shell -c introduces a new
   // program whose literal heredoc data must also stay outside execution.
   const executable = depth === 0 ? raw : stripHeredocBodies(raw);
@@ -805,10 +837,17 @@ function isDestructiveQuoteAware(raw, depth = 0) {
       if (isDestructiveSqlClient(tokens)) return true;
       if (isDestructiveFindExec(tokens)) return true;
       const argv = unwrapLeadWrappers(tokens, true, true);
-      if (SHELL_WRAPPERS.has(commandBasename(argv[0]))) {
-        const ci = argv.indexOf('-c', 1);
+      const base = commandBasename(argv[0]);
+      if (SHELL_WRAPPERS.has(base)) {
+        // `-c`, or a short-option cluster that includes it (`-lc`, `-ec`).
+        const ci = argv.findIndex((arg, i) => i > 0 && /^-[A-Za-z]*c[A-Za-z]*$/.test(arg));
         if (ci !== -1 && argv[ci + 1] && isDestructiveQuoteAware(argv[ci + 1], depth + 1)) {
           return true;
+        }
+      }
+      if (base === 'su') {
+        for (const commandLine of suCommandLines(argv)) {
+          if (isDestructiveQuoteAware(commandLine, depth + 1)) return true;
         }
       }
     }
