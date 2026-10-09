@@ -52,6 +52,7 @@ const {
 } = require('./excluded-paths-reconciliation');
 const { buildInstallIndex, rewriteRelativeLinks } = require('./link-rewrite');
 const { adaptAntigravityAgent } = require('./antigravity-agent');
+const { adaptCopilotAgent } = require('./copilot-agent');
 
 function isMarkdownPath(filePath) {
   return /\.(md|mdx|markdown)$/i.test(String(filePath || ''));
@@ -69,6 +70,9 @@ function transformInstallContent(operation, content) {
   }
   if (operation.contentTransform === 'opencode-disable-plugin-entrypoint') {
     return getDisabledOpenCodePluginContent();
+  }
+  if (operation.contentTransform === 'copilot-agent-frontmatter') {
+    return adaptCopilotAgent(content, operation.sourceRelativePath);
   }
   throw new Error(`Unknown install content transform: ${operation.contentTransform}`);
 }
