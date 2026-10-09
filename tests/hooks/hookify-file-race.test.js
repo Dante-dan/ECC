@@ -7,6 +7,7 @@ const path = require('node:path');
 const { Module, createRequire } = require('node:module');
 const { spawnSync } = require('node:child_process');
 const { test } = require('node:test');
+const { compileFunction } = require('node:vm');
 
 const runtimePath = path.resolve(__dirname, '../../scripts/hooks/hookify-runtime.js');
 const MAX_BYTES = 64 * 1024;
@@ -25,6 +26,14 @@ function fixture(t, options = {}) {
   const io = {
     ...fs,
     constants: { ...fs.constants, ...(options.noFollow === false ? { O_NOFOLLOW: 0 } : {}) },
+    lstatSync(name, ...args) {
+      const stat = fs.lstatSync(name, ...args);
+      return options.pathStat ? options.pathStat(stat, { root, directory, file, name }) : stat;
+    },
+    fstatSync(fd, ...args) {
+      const stat = fs.fstatSync(fd, ...args);
+      return options.handleStat ? options.handleStat(stat, { root, directory, file, fd }) : stat;
+    },
     openSync(name, openFlags, ...args) {
       if (name === file && options.beforeOpen) options.beforeOpen({ root, directory, file });
       if (options.requireNonblocking) assert.ok(openFlags & fs.constants.O_NONBLOCK);
@@ -55,9 +64,118 @@ function fixture(t, options = {}) {
   copy.paths = Module._nodeModulePaths(path.dirname(runtimePath));
   const localRequire = createRequire(runtimePath);
   copy.require = name => name === 'fs' ? io : localRequire(name);
-  copy._compile(fs.readFileSync(runtimePath, 'utf8'), runtimePath);
+  const runtimeProcess = Object.create(process);
+  Object.defineProperty(runtimeProcess, 'platform', { value: options.platform || process.platform });
+  // Execute exact source with a local process binding and real filesystem IO.
+  // Platform/stat injection never changes the host process or shared fs module.
+  compileFunction(fs.readFileSync(runtimePath, 'utf8').replace(/^#![^\n]*\n/, ''),
+    ['module', 'require', 'process'], { filename: runtimePath })(copy, copy.require, runtimeProcess);
   return { root, directory, file, io, runtime: copy.exports, descriptors, reads, flags };
 }
+
+function withStatFields(stat, fields) {
+  return Object.assign(Object.create(stat), fields);
+}
+
+function windowsFixture(t, options = {}) {
+  return fixture(t, {
+    platform: 'win32',
+    pathStat: stat => withStatFields(stat, { dev: 0n }),
+    handleStat: stat => withStatFields(stat, { dev: 1644385068n }),
+    ...options,
+  });
+}
+
+for (const action of ['warn', 'block']) {
+  for (const missing of ['path', 'handle']) {
+    test(`Windows ${missing}-stat missing device preserves real loader ${action} enforcement`, t => {
+      const context = windowsFixture(t, missing === 'handle' ? {
+        pathStat: stat => withStatFields(stat, { dev: 3054669153n }),
+        handleStat: stat => withStatFields(stat, { dev: 0n }),
+      } : {});
+      fs.writeFileSync(context.file, ruleText('trusted').replace('action: block', `action: ${action}`));
+      const loaded = context.runtime.loadRules(context.root);
+      assert.deepEqual(loaded.rules.map(rule => rule.name), ['trusted']);
+      assert.deepEqual(loaded.diagnostics, []);
+      const result = context.runtime.run({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'echo BLOCK_ME' } }, {
+        cwd: context.root, env: { CLAUDE_PROJECT_DIR: context.root, ECC_HOOKIFY_ALLOW_TRACKED: '1' },
+      });
+      assert.equal(result.stderr, '');
+      const output = JSON.parse(result.stdout).hookSpecificOutput;
+      if (action === 'block') assert.equal(output.permissionDecision, 'deny');
+      else {
+        assert.equal(output.permissionDecision, undefined);
+        assert.match(output.additionalContext, /Local policy\./);
+      }
+      assert.equal(context.descriptors.size, 0);
+    });
+  }
+}
+
+test('Windows matching reported devices load an unchanged rule', t => {
+  const context = windowsFixture(t, {
+    pathStat: stat => withStatFields(stat, { dev: 1644385068n }),
+  });
+  assert.deepEqual(context.runtime.loadRules(context.root).rules.map(rule => rule.name), ['trusted']);
+});
+
+for (const platform of ['win32', 'linux', 'darwin']) {
+  test(`${platform} rejects mismatching reported devices before reading`, t => {
+    const context = windowsFixture(t, {
+      platform, pathStat: stat => withStatFields(stat, { dev: 3054669153n }),
+    });
+    rejected(context.runtime.loadRules(context.root), context);
+    assert.equal(context.reads.length, 0);
+  });
+  if (platform !== 'win32') test(`${platform} still rejects a missing path device`, t => {
+    const context = windowsFixture(t, { platform });
+    rejected(context.runtime.loadRules(context.root), context);
+    assert.equal(context.reads.length, 0);
+  });
+}
+
+for (const field of ['ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeNs', 'ctimeNs']) {
+  test(`Windows missing device does not relax ${field} consistency`, t => {
+    const context = windowsFixture(t, {
+      handleStat: stat => withStatFields(stat, { dev: 1644385068n, [field]: stat[field] + 1n }),
+    });
+    rejected(context.runtime.loadRules(context.root), context);
+    assert.equal(context.reads.length, 0);
+  });
+}
+
+test('Windows missing path device does not hide descriptor-device changes', t => {
+  let stats = 0;
+  const context = windowsFixture(t, {
+    handleStat: stat => withStatFields(stat, { dev: ++stats === 1 ? 1644385068n : 3054669153n }),
+  });
+  rejected(context.runtime.loadRules(context.root), context);
+  assert.equal(context.reads.length, 0);
+});
+
+test('Windows missing device still rejects same-inode content mutation during reading', t => {
+  let replaced = false;
+  const context = windowsFixture(t, { beforeRead({ file }) {
+    if (replaced) return;
+    replaced = true;
+    fs.writeFileSync(file, ruleText('outside'));
+    fs.utimesSync(file, new Date(2000), new Date(2000));
+  } });
+  rejected(context.runtime.loadRules(context.root), context);
+  assert.ok(replaced);
+});
+
+test('Windows missing device keeps the growth read bounded at ceiling plus one', t => {
+  let grown = false;
+  const context = windowsFixture(t, { beforeRead({ file }) {
+    if (grown) return;
+    grown = true;
+    fs.appendFileSync(file, 'x'.repeat(MAX_BYTES * 4));
+  } });
+  rejected(context.runtime.loadRules(context.root), context);
+  assert.ok(grown);
+  assert.ok(context.reads.reduce((sum, size) => sum + size, 0) <= MAX_BYTES + 1);
+});
 
 function rejected(result, context) {
   assert.equal(result.rules.length, 0, 'raced content must not become a rule');

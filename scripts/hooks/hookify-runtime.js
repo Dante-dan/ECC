@@ -213,7 +213,11 @@ function normalizeRule(frontmatter, message, sourcePath) {
 }
 
 function sameRuleIdentity(left, right) {
-  return ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink'].every(key => left[key] === right[key]);
+  // Match sameFileIdentity()'s missing Windows volume-serial exception. Keep
+  // reported devices strict, and never apply this exception on other platforms.
+  const sameDevice = left.dev === right.dev
+    || (process.platform === 'win32' && (!left.dev || !right.dev));
+  return sameDevice && ['ino', 'uid', 'gid', 'mode', 'nlink'].every(key => left[key] === right[key]);
 }
 
 function sameRuleSnapshot(left, right) {
