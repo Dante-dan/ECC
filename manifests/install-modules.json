@@ -266,6 +266,11 @@
         "commands-core",
         "platform-configs"
       ],
+      "optionalDependencies": [
+        "rules-core",
+        "agents-core",
+        "commands-core"
+      ],
       "defaultInstall": false,
       "cost": "medium",
       "stability": "stable"
@@ -856,6 +861,9 @@
       "dependencies": [
         "commands-core",
         "platform-configs"
+      ],
+      "optionalDependencies": [
+        "commands-core"
       ],
       "defaultInstall": false,
       "cost": "medium",
