@@ -8,6 +8,7 @@ const os = require('os');
 const path = require('path');
 const http = require('http');
 const net = require('net');
+const vm = require('vm');
 
 const SCRIPT = path.join(__dirname, '..', '..', 'scripts', 'dashboard-web.js');
 
@@ -16,6 +17,37 @@ let testPassed = 0;
 let testFailed = 0;
 const asyncTests = [];
 const REQUEST_TIMEOUT_MS = 5000;
+
+test('renderHTML emits executable scripts without syntax errors', () => {
+  const { renderHTML } = require(SCRIPT);
+  const html = renderHTML({ agents: [], skills: [], commands: [], rules: [], mcps: [], hooks: [] });
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+  assert.ok(scripts.length > 0);
+  for (const script of scripts) new vm.Script(script[1]);
+});
+
+test('activity loading bounds large logs and ignores malformed rows', () => {
+  const { loadActivity } = require(SCRIPT);
+  withTempDir('ecc-activity-', dir => {
+    const log = path.join(dir, 'usage.jsonl');
+    const row = name => JSON.stringify({ session_id: 'fixture', tool_name: name });
+    fs.writeFileSync(log, 'x'.repeat(1024 * 1024) + '\n' + row('Read') + '\nnull\n{"session_id":42,"tool_name":"Read"}\nnot-json\n' + row('Skill') + '\n');
+    const originalRead = fs.readSync;
+    let bytesRequested = 0;
+    fs.readSync = (...args) => {
+      bytesRequested += args[3];
+      return originalRead(...args);
+    };
+    let rows;
+    try { rows = loadActivity(200, log); }
+    finally { fs.readSync = originalRead; }
+    assert.ok(bytesRequested <= 256 * 1024);
+    assert.deepStrictEqual(rows.map(entry => entry.tool_name), ['Skill', 'Read']);
+    fs.writeFileSync(log, row('Edit') + '\n');
+    assert.deepStrictEqual(loadActivity(200, log).map(entry => entry.tool_name), ['Edit']);
+    assert.deepStrictEqual(loadActivity(200, path.join(dir, 'missing')), []);
+  });
+});
 
 function test(name, fn) {
   try {

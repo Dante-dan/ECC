@@ -857,7 +857,7 @@ handleRoute();
           '<span class="act-pill act-pill-agent">Agent: ' + agentCount + '</span>' +
           '</div>';
         if (!entries.length) {
-          panel.innerHTML = summary + '<div class="act-empty">No recorded tool calls yet — this reads ~/.claude/metrics/tool-usage.jsonl, written by the session-activity-tracker PostToolUse hook. Needs that hook active in the session you\'re watching.</div>';
+          panel.innerHTML = summary + '<div class="act-empty">No recorded tool calls yet. This reads ~/.claude/metrics/tool-usage.jsonl, written by the session-activity-tracker PostToolUse hook. Requires that hook in the active session.</div>';
           return;
         }
         panel.innerHTML = summary + '<div class="act-feed">' + entries.map(rowHtml).join('') + '</div>';
@@ -918,20 +918,36 @@ function sendHtml(res, statusCode, html) {
   res.end(html);
 }
 
-function loadActivity(limit = 200) {
-  const logPath = path.join(os.homedir(), '.claude', 'metrics', 'tool-usage.jsonl');
+const MAX_ACTIVITY_LOG_BYTES = 256 * 1024;
+
+function loadActivity(limit = 200, logPath = path.join(os.homedir(), '.claude', 'metrics', 'tool-usage.jsonl')) {
+  let fd;
   let text;
   try {
-    text = fs.readFileSync(logPath, 'utf8');
+    fd = fs.openSync(logPath, 'r');
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) return [];
+    const length = Math.min(stat.size, MAX_ACTIVITY_LOG_BYTES);
+    const start = stat.size - length;
+    const buffer = Buffer.alloc(length);
+    const bytesRead = fs.readSync(fd, buffer, 0, length, start);
+    text = buffer.toString('utf8', 0, bytesRead);
+    // A bounded tail may start inside a JSON row or a multibyte character.
+    if (start > 0) text = text.slice(text.indexOf('\n') + 1);
   } catch {
     return [];
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
   }
   const lines = text.split('\n').filter(Boolean);
   const start = Math.max(0, lines.length - limit);
   const out = [];
   for (let i = lines.length - 1; i >= start; i -= 1) {
     try {
-      out.push(JSON.parse(lines[i]));
+      const row = JSON.parse(lines[i]);
+      if (row && !Array.isArray(row) && typeof row.session_id === 'string' && typeof row.tool_name === 'string') {
+        out.push(row);
+      }
     } catch {
       // Skip unparseable lines rather than fail the whole feed.
     }
@@ -1063,6 +1079,7 @@ module.exports = {
   createDashboardServer,
   listenDashboardServer,
   loadAgents,
+  loadActivity,
   loadCommands,
   loadHooks,
   loadMcps,
