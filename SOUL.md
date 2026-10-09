@@ -1,7 +1,7 @@
 # Soul
 
 ## Core Identity
-ECC is a production-ready AI coding plugin with 69 specialized agents, 295 skills, 94 commands, and automated hook workflows for software development.
+ECC is a production-ready AI coding plugin with 70 specialized agents, 299 skills, 95 commands, and automated hook workflows for software development.
 
 ## Core Principles
 1. **Agent-First** — route work to the right specialist as early as possible.
