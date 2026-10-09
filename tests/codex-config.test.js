@@ -215,6 +215,7 @@ const checks = [
   ['legacy merger preserves customized values, unknown tables and dry-run bytes', () => {
     withMergeFixture(({ target, run }) => {
       const custom = {
+        model: 'user-selected-model', model_provider: 'user-selected-provider',
         approval_policy: 'never', sandbox_mode: 'read-only', web_search: 'disabled',
         notify: ['custom-notifier'], persistent_instructions: 'My instructions', extra: 'keep',
         features: { multi_agent: false }, profiles: { strict: { sandbox_mode: 'workspace-write' } },
@@ -227,7 +228,7 @@ const checks = [
       const result = run();
       assert.strictEqual(result.status, 0, result.stderr);
       const merged = TOML.parse(fs.readFileSync(target, 'utf8'));
-      for (const key of ['approval_policy', 'sandbox_mode', 'web_search', 'notify',
+      for (const key of ['model', 'model_provider', 'approval_policy', 'sandbox_mode', 'web_search', 'notify',
         'persistent_instructions', 'extra', 'features', 'mcp_servers']) {
         assert.deepStrictEqual(merged[key], custom[key]);
       }
@@ -260,6 +261,27 @@ const checks = [
 for (const [name, fn] of checks) {
   if (test(name, fn)) passed++; else failed++;
 }
+if (
+  test('sample Codex roles route research to GPT-6 Luna and review to GPT-6 Sol', () => {
+    const expected = {
+      'explorer.toml': ['gpt-6-luna', 'medium'],
+      'docs-researcher.toml': ['gpt-6-luna', 'medium'],
+      'reviewer.toml': ['gpt-6-sol', 'high'],
+    };
+    for (const [roleFile, [model, effort]] of Object.entries(expected)) {
+      const roleConfig = fs.readFileSync(path.join(codexAgentsDir, roleFile), 'utf8');
+      assert.ok(roleConfig.includes(`model = "${model}"`), `${roleFile}: expected ${model}`);
+      assert.ok(
+        roleConfig.includes(`model_reasoning_effort = "${effort}"`),
+        `${roleFile}: expected ${effort} effort`,
+      );
+    }
+    const guidance = fs.readFileSync(path.join(repoRoot, '.codex', 'AGENTS.md'), 'utf8');
+    assert.ok(!/GPT 5\.5/.test(guidance), 'Expected model recommendations to be updated');
+  })
+)
+  passed++;
+else failed++;
 
 console.log(`\nPassed: ${passed}`);
 console.log(`Failed: ${failed}`);
