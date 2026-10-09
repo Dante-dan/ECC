@@ -117,9 +117,12 @@ async function runSynthetic(test) {
     assert.ok(replacement);
     assert.strictEqual(fixture.calls.filter(call => call === 'close').length, 1);
   });
-  for (const platform of ['linux', 'win32']) {
-    for (const replacement of [{ ino: 3n }, { dev: 9n }, { dev: 0n }, { isFile: () => false }, { isSymbolicLink: () => true }]) {
-      await test(`observed lock replacement is preserved (${platform}, ${Object.keys(replacement)[0]})`, () => {
+  for (const platform of ['linux', 'darwin', 'win32']) {
+    for (const replacement of [
+      { ino: 3n }, { dev: 9n }, { isFile: () => false }, { isSymbolicLink: () => true },
+      ...(platform === 'win32' ? [{ dev: 0n, isFile: () => false }, { dev: 0n, isSymbolicLink: () => true }] : []),
+    ]) {
+      await test(`observed lock replacement is preserved (${platform}, ${Object.keys(replacement).join('+')})`, () => {
         const fixture = lockFixture({ lstatSync(state) { state.calls.push('lstat'); return { ...state.identity, ...replacement }; } }, platform);
         const result = thrownBy(() => fixture.run(() => {}));
         assert.ok(result.failed);
@@ -128,6 +131,45 @@ async function runSynthetic(test) {
         assert.strictEqual(fixture.calls.filter(call => call === 'close').length, 1);
       });
     }
+  }
+  const highInode = 9007199254740992n;
+  const identityCases = [
+    { name: 'matching high inode and devices', platform: 'win32', ownedDev: 9n, pathDev: 9n, allowed: true },
+    { name: 'missing path device', platform: 'win32', ownedDev: 9n, pathDev: 0n, allowed: true },
+    { name: 'missing descriptor device', platform: 'win32', ownedDev: 0n, pathDev: 9n, allowed: true },
+    { name: 'both devices unavailable', platform: 'win32', ownedDev: 0n, pathDev: 0n, allowed: true },
+    ...['linux', 'darwin'].flatMap(platform => [
+      { name: 'missing path device', platform, ownedDev: 9n, pathDev: 0n, allowed: false },
+      { name: 'missing descriptor device', platform, ownedDev: 0n, pathDev: 9n, allowed: false },
+    ]),
+    ...[[9n, 9n], [9n, 0n], [0n, 9n], [0n, 0n]].map(([ownedDev, pathDev]) => ({
+      name: `distinct high inodes with devices ${ownedDev}/${pathDev}`,
+      platform: 'win32', ownedDev, pathDev, pathInode: highInode + 1n, allowed: false,
+    })),
+  ];
+  for (const identityCase of identityCases) {
+    await test(`lock identity handles ${identityCase.name} (${identityCase.platform})`, () => {
+      const fixture = lockFixture({
+        fstatSync(state, stat, descriptor, options) {
+          assert.strictEqual(options.bigint, true);
+          return { ...stat(), dev: identityCase.ownedDev, ino: highInode };
+        },
+        lstatSync(state, stat, lockPath, options) {
+          assert.strictEqual(options.bigint, true);
+          return { ...stat(), dev: identityCase.pathDev, ino: identityCase.pathInode ?? highInode };
+        },
+      }, identityCase.platform);
+      const result = thrownBy(() => fixture.run(() => 'done'));
+      if (identityCase.allowed) {
+        assert.strictEqual(result.failed, false, result.error && result.error.message);
+        assert.strictEqual(result.value, 'done');
+        assert.deepStrictEqual(fixture.calls, ['open', 'fstat', 'write', 'lstat', 'unlink', 'close']);
+      } else {
+        assert.strictEqual(result.failed, true);
+        assert.strictEqual(result.error.code, 'STATE_STORE_LOCK_LOST');
+        assert.deepStrictEqual(fixture.calls, ['open', 'fstat', 'write', 'lstat', 'close']);
+      }
+    });
   }
   for (const afterClose of ['missing', 'permission', 'replacement']) {
     await test(`initial EPERM performs only a post-close read probe (${afterClose})`, () => {

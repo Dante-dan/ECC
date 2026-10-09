@@ -28,7 +28,11 @@ function hasCode(error, code) {
 }
 
 function sameIdentity(left, right) {
-  return left.ino === right.ino && left.dev === right.dev;
+  if (left.ino !== right.ino) return false;
+  // Windows path stats can omit the volume serial (dev = 0) even when fstat
+  // reports it. Keep device checks strict elsewhere and when both are known.
+  if (process.platform === 'win32' && (left.dev === 0n || right.dev === 0n)) return true;
+  return left.dev === right.dev;
 }
 
 function lostLock(lockPath) {
