@@ -91,6 +91,12 @@ const tests = [
     assert.match(result.annotations[0], /AssertionError: mismatch/);
     assert.ok(!result.annotations[0].includes('PASS handles'));
   }],
+  ['successful files without counts do not invent test totals', () => {
+    const result = run({ status: 0, stdout: 'suite complete' });
+    assert.strictEqual(result.status, 0);
+    assert.ok(result.logs.some(line => /Passed:\s+0\s/.test(line)));
+    assert.ok(result.logs.some(line => /Files: 1 passed, 0 failed/.test(line)));
+  }],
   ['healthy suites preserve successful totals and emit no annotation', () => {
     const result = run({ status: 0, stdout: 'Passed: 3, Failed: 0' });
     assert.strictEqual(result.status, 0);

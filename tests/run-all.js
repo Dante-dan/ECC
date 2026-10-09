@@ -104,7 +104,7 @@ console.log('╚' + '═'.repeat(BOX_W) + '╝');
 console.log();
 
 if (skipPatterns.length > 0) {
-  console.log(`⚠ Skipped patterns: ${skipPatterns.join(', ')}`);
+  console.log(`Skipped patterns: ${skipPatterns.join(', ')}`);
   console.log();
 }
 
@@ -174,8 +174,6 @@ for (const testFile of testFiles) {
     if (counts.definite) {
       totalPassed += counts.passed;
       totalFailed += counts.failed;
-    } else {
-      totalPassed += 1;
     }
   }
 }
