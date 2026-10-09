@@ -42,6 +42,7 @@ const {
   validateManagedHooks,
 } = require('./install/claude-settings');
 const { adaptAntigravityAgent } = require('./install/antigravity-agent');
+const { adaptCopilotAgent } = require('./install/copilot-agent');
 const { buildInstallIndex, rewriteRelativeLinks } = require('./install/link-rewrite');
 const { getInstallTargetAdapter, listInstallTargetAdapters } = require('./install-targets/registry');
 const { resolveInvocationEnvironment } = require('./invocation-environment');
@@ -244,6 +245,9 @@ function transformCopyFileContent(operation, content) {
   }
   if (operation.contentTransform === 'opencode-disable-plugin-entrypoint') {
     return getDisabledOpenCodePluginContent();
+  }
+  if (operation.contentTransform === 'copilot-agent-frontmatter') {
+    return adaptCopilotAgent(content, operation.sourceRelativePath);
   }
   throw new Error(`Unknown install content transform: ${operation.contentTransform}`);
 }
@@ -1919,9 +1923,11 @@ function prepareRepairMigration(plan, record) {
     statePreview: buildAdapterDerivedStatePreview(plan.statePreview, record),
   };
   const initialMigration = prepareClaudeSkillMigration(trustedPlan);
-  const guardedMigration = record.adapter.id === 'codex-home'
-    ? prepareUserOwnedFileGuard(trustedPlan, initialMigration)
-    : initialMigration;
+  // Repair normalizes recorded target metadata to the adapter-derived roots.
+  // Preserve its recorded operations as the ownership evidence.
+  const guardedMigration = prepareUserOwnedFileGuard(
+    trustedPlan, initialMigration, buildAdapterDerivedStatePreview(record.state, record)
+  );
   const migration = trustedPlan.target === 'opencode'
     ? require('./install/apply').prepareHookConsentMigration(trustedPlan, guardedMigration)
     : guardedMigration;
@@ -2240,9 +2246,7 @@ function repairInstalledStates(options = {}) {
             const { assertOpenCodeActivationUnchanged } = require('./install/apply');
             assertOpenCodeActivationUnchanged(desiredPlan, operation, activationSnapshot);
           }
-          if (record.adapter.id === 'codex-home') {
-            assertNoNewUserOwnedFile(migration, operation, desiredPlan);
-          }
+          assertNoNewUserOwnedFile(migration, operation, desiredPlan);
           const repairedPath = executeRepairOperation(
             context.repoRoot,
             operation,
