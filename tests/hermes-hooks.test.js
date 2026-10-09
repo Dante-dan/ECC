@@ -70,7 +70,6 @@ const protectedConfigs = [
 
 let passed = 0;
 let failed = 0;
-const results = [];
 
 function run(name, fn) {
   const ok = test(name, fn);
