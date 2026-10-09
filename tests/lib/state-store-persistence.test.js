@@ -426,11 +426,106 @@ async function run() {
         reader.listWorkItems();
         reader.getStatus();
         assert.strictEqual(reader.getAppliedMigrations().length, 2);
+        for (const method of ['get', 'all']) {
+          const read = () => reader._database.prepare('SELECT id FROM work_items')[method]();
+          assert.deepStrictEqual(read(), method === 'get' ? { id: 'saved' } : [{ id: 'saved' }]);
+          reader._database.transaction(read)();
+        }
       } finally { reader.close(); }
     } finally { fs.renameSync = rename; }
     assert.strictEqual(writes, 0);
     assert.deepStrictEqual(fs.readFileSync(dbPath), before);
   });
+
+  const returningMutations = [
+    {
+      action: 'INSERT',
+      sql: "INSERT INTO returning_probe VALUES (3, 'new'), (4, 'new') RETURNING id, value",
+      returned: [{ id: 3, value: 'new' }, { id: 4, value: 'new' }],
+      saved: [{ id: 1, value: 'original' }, { id: 2, value: 'original' }, { id: 3, value: 'new' }, { id: 4, value: 'new' }],
+    },
+    {
+      action: 'UPDATE',
+      sql: "UPDATE returning_probe SET value = 'updated' RETURNING id, value",
+      returned: [{ id: 1, value: 'updated' }, { id: 2, value: 'updated' }],
+      saved: [{ id: 1, value: 'updated' }, { id: 2, value: 'updated' }],
+    },
+    {
+      action: 'DELETE',
+      sql: 'DELETE FROM returning_probe RETURNING id, value',
+      returned: [{ id: 1, value: 'original' }, { id: 2, value: 'original' }],
+      saved: [],
+    },
+  ];
+  for (const method of ['get', 'all']) {
+    for (const transactional of [false, true]) {
+      for (const mutation of returningMutations) {
+        await test(`prepared ${method} persists ${mutation.action} RETURNING (${transactional ? 'query-only transaction' : 'standalone'})`, async dbPath => {
+          const store = await createStateStore({ dbPath });
+          try {
+            store._database.exec("CREATE TABLE returning_probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL); INSERT INTO returning_probe VALUES (1, 'original'), (2, 'original');");
+            const before = fs.readFileSync(dbPath);
+            const mutate = () => {
+              const result = store._database.prepare(mutation.sql)[method]();
+              if (method === 'get') assert.ok(mutation.returned.some(row => row.id === result.id && row.value === result.value));
+              else assert.deepStrictEqual(result.sort((a, b) => a.id - b.id), mutation.returned);
+              if (transactional) assert.deepStrictEqual(fs.readFileSync(dbPath), before, 'RETURNING must not publish before COMMIT');
+            };
+            if (transactional) store._database.transaction(mutate)();
+            else mutate();
+            assert.deepStrictEqual(store._database.prepare('SELECT id, value FROM returning_probe ORDER BY id').all(), mutation.saved,
+              'the next snapshot must retain the mutation');
+          } finally { store.close(); }
+          const reopened = await createStateStore({ dbPath });
+          try {
+            assert.deepStrictEqual(reopened._database.prepare('SELECT id, value FROM returning_probe ORDER BY id').all(), mutation.saved);
+          } finally { reopened.close(); }
+        });
+      }
+
+      await test(`prepared ${method} persists no-row PRAGMA writes (${transactional ? 'query-only transaction' : 'standalone'})`, async dbPath => {
+        const store = await createStateStore({ dbPath });
+        try {
+          const before = fs.readFileSync(dbPath);
+          const mutate = () => {
+            for (const pragma of ['user_version = 3252', 'application_id(2468)']) {
+              const result = store._database.prepare(`PRAGMA ${pragma}`)[method]();
+              assert.deepStrictEqual(result, method === 'get' ? null : []);
+            }
+            if (transactional) assert.deepStrictEqual(fs.readFileSync(dbPath), before, 'prepared PRAGMAs must not publish before COMMIT');
+          };
+          if (transactional) store._database.transaction(mutate)();
+          else mutate();
+          assert.strictEqual(store._database.prepare('PRAGMA user_version').get().user_version, 3252);
+          assert.strictEqual(store._database.prepare('PRAGMA application_id').get().application_id, 2468);
+        } finally { store.close(); }
+        const reopened = await createStateStore({ dbPath });
+        try {
+          assert.strictEqual(reopened._database.prepare('PRAGMA user_version').get().user_version, 3252);
+          assert.strictEqual(reopened._database.prepare('PRAGMA application_id').get().application_id, 2468);
+        } finally { reopened.close(); }
+      });
+    }
+
+    await test(`prepared ${method} RETURNING and PRAGMA writes roll back without changing disk`, async dbPath => {
+      const store = await createStateStore({ dbPath });
+      try {
+        store._database.exec("CREATE TABLE returning_probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL); INSERT INTO returning_probe VALUES (1, 'original'), (2, 'original');");
+        const before = fs.readFileSync(dbPath);
+        const failure = new Error('abort prepared writes');
+        assert.throws(() => store._database.transaction(() => {
+          for (const mutation of returningMutations) store._database.prepare(mutation.sql)[method]();
+          store._database.prepare('PRAGMA user_version = 3252')[method]();
+          assert.deepStrictEqual(fs.readFileSync(dbPath), before);
+          throw failure;
+        })(), error => error === failure);
+        assert.deepStrictEqual(fs.readFileSync(dbPath), before);
+        assert.deepStrictEqual(store._database.prepare('SELECT id, value FROM returning_probe ORDER BY id').all(),
+          [{ id: 1, value: 'original' }, { id: 2, value: 'original' }]);
+        assert.strictEqual(store._database.prepare('PRAGMA user_version').get().user_version, 0);
+      } finally { store.close(); }
+    });
+  }
 
   await test('persistent PRAGMA changes survive snapshot reload and reopening', async dbPath => {
     const store = await createStateStore({ dbPath });
@@ -459,6 +554,19 @@ async function run() {
       store._database.pragma('user_version');
       store._database.pragma('table_info(work_items)');
       store._database.pragma('integrity_check');
+      for (const method of ['get', 'all']) {
+        const read = () => {
+          for (const pragma of ['user_version', 'table_info(work_items)', 'integrity_check']) {
+            store._database.prepare(`PRAGMA ${pragma}`)[method]();
+          }
+        };
+        read();
+        store._database.transaction(read)();
+        store._database.withSnapshot(() => {
+          store._database.prepare('PRAGMA cache_size = 512')[method]();
+          assert.strictEqual(store._database.prepare('PRAGMA cache_size').get().cache_size, 512);
+        });
+      }
       store._database.transaction(() => {
         store._database.pragma('user_version');
         store._database.pragma('table_info(work_items)');

@@ -208,7 +208,7 @@ function wrapSqlJsDatabase(SQL, dbPath) {
   let inSnapshot = false;
   let dirty = false;
   let inTransaction = false;
-  let pragmaExecuted = false;
+  let needsSnapshotComparison = false;
   let snapshotBytes = null;
 
   function reload() {
@@ -245,17 +245,18 @@ function wrapSqlJsDatabase(SQL, dbPath) {
       reload();
       inSnapshot = true;
       dirty = false;
-      pragmaExecuted = false;
+      needsSnapshotComparison = false;
       try {
         const result = callback();
         if (result && typeof result.then === 'function') {
           throw new Error('State-store operations must be synchronous');
         }
-        if ((dirty || pragmaExecuted) && dbPath !== ':memory:') {
-          // SQLite PRAGMAs include reads, connection settings and persisted
-          // changes. Compare the resulting database instead of parsing their
-          // SQL syntax. Export only here: exporting inside a transaction would
-          // implicitly end it before our commit/rollback boundary.
+        if ((dirty || needsSnapshotComparison) && dbPath !== ':memory:') {
+          // Prepared get/all statements and PRAGMAs can also write. Compare
+          // database bytes instead of guessing from SQL syntax, while keeping
+          // read-only queries from rewriting the file. Export only here:
+          // exporting inside a transaction would implicitly end it before
+          // our commit/rollback boundary.
           const data = Buffer.from(rawDb.export());
           if (dirty || !snapshotBytes || !data.equals(snapshotBytes)) {
             writeDatabaseFileAtomic(dbPath, data);
@@ -265,7 +266,7 @@ function wrapSqlJsDatabase(SQL, dbPath) {
       } finally {
         inSnapshot = false;
         dirty = false;
-        pragmaExecuted = false;
+        needsSnapshotComparison = false;
       }
     };
     return dbPath === ':memory:' ? execute() : withStateStoreLock(dbPath, execute);
@@ -280,6 +281,7 @@ function wrapSqlJsDatabase(SQL, dbPath) {
         } else if (positionalArgs.length > 1) {
           stmt.bind(positionalArgs);
         }
+        needsSnapshotComparison = true;
         if (firstOnly) return stmt.step() ? stmt.getAsObject() : null;
         const rows = [];
         while (stmt.step()) rows.push(stmt.getAsObject());
@@ -347,7 +349,7 @@ function wrapSqlJsDatabase(SQL, dbPath) {
     pragma(pragmaStr) {
       return withSnapshot(() => {
         rawDb.run(`PRAGMA ${pragmaStr}`);
-        pragmaExecuted = true;
+        needsSnapshotComparison = true;
       });
     },
 
