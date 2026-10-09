@@ -101,7 +101,7 @@ def load_custom_roles(root: Path, report: Report) -> tuple[dict[object, object],
         return {}, False
     try:
         loaded = json.loads(mapping_source.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         report.fail(f"Cannot read .governance/docs-map.json: {diagnostic(exc)}")
         return {}, False
     if not isinstance(loaded, dict):

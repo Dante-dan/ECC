@@ -135,5 +135,7 @@ for (const [name, fn] of tests) {
     console.error(`    ${error.message}`);
   }
 }
-if (failed) process.exit(1);
-console.log(`\n${tests.length - failed - skipped}/${tests.length} passed, ${skipped} skipped`);
+console.log(`\nPassed: ${tests.length - failed - skipped}`);
+console.log(`Skipped: ${skipped}`);
+console.log(`Failed: ${failed}`);
+process.exitCode = failed ? 1 : 0;

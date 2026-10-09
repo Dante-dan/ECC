@@ -3,16 +3,22 @@ const path = require('path');
 const {
   createInstallTargetAdapter,
   createManagedOperation,
-  createManagedScaffoldOperation,
   normalizeRelativePath,
 } = require('./helpers');
 
 // GitHub Copilot CLI discovers skills from `.github/skills/` and custom agents
-// from `.github/agents/`. Those two directories are the entire supported
-// surface for this target: ECC's hooks target Claude Code's event model, and
-// commands rely on slash-command argument substitution Copilot does not
-// provide, so neither is installed here.
+// from `.github/agents/`. Explicitly declared package-manager helpers live in
+// `.github/ecc/scripts/`, outside Copilot's discovery roots. ECC's hooks target
+// Claude Code's event model, and commands rely on slash-command argument
+// substitution Copilot does not provide, so neither is installed here.
 const SUPPORTED_SOURCE_PREFIXES = ['agents', 'skills'];
+const COPILOT_HELPER_PATHS = new Set([
+  'scripts/setup-package-manager.js',
+  'scripts/lib/package-manager.js',
+  'scripts/lib/utils.js',
+  'scripts/lib/agent-data-home.js',
+  'scripts/lib/path-safety.js',
+]);
 
 function hasPrefix(normalizedPath, prefix) {
   return normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`);
@@ -21,7 +27,8 @@ function hasPrefix(normalizedPath, prefix) {
 function supportsCopilotSourcePath(sourceRelativePath) {
   const normalizedPath = normalizeRelativePath(sourceRelativePath);
   if (normalizedPath.split('/').includes('..')) return false;
-  return SUPPORTED_SOURCE_PREFIXES.some(prefix => hasPrefix(normalizedPath, prefix));
+  return COPILOT_HELPER_PATHS.has(normalizedPath)
+    || SUPPORTED_SOURCE_PREFIXES.some(prefix => hasPrefix(normalizedPath, prefix));
 }
 
 function stripPrefix(normalizedPath, prefix) {
@@ -49,13 +56,21 @@ function planSourcePathOperations(module, sourceRelativePath, targetRoot) {
 
   if (hasPrefix(normalizedSourcePath, 'skills')) {
     return [
-      createManagedScaffoldOperation(
-        module.id,
-        normalizedSourcePath,
-        path.join(targetRoot, 'skills', stripPrefix(normalizedSourcePath, 'skills')),
-        'preserve-relative-path'
-      ),
+      createManagedOperation({
+        moduleId: module.id,
+        sourceRelativePath: normalizedSourcePath,
+        destinationPath: path.join(targetRoot, 'skills', stripPrefix(normalizedSourcePath, 'skills')),
+        contentTransform: 'copilot-workflow-paths',
+      }),
     ];
+  }
+
+  if (COPILOT_HELPER_PATHS.has(normalizedSourcePath)) {
+    return [createManagedOperation({
+      moduleId: module.id,
+      sourceRelativePath: normalizedSourcePath,
+      destinationPath: path.join(targetRoot, 'ecc', normalizedSourcePath),
+    })];
   }
 
   return [];
@@ -70,7 +85,7 @@ module.exports = createInstallTargetAdapter({
   supportsModule(module) {
     // Selection gating stays permissive so modules that only act as dependency
     // anchors (rules-core, commands-core, platform-configs) still resolve.
-    // planOperations() is what narrows the install to agents and skills, so an
+    // planOperations() narrows the install to agents, skills and declared helpers. An
     // unsupported path contributes zero operations rather than skipping the
     // module and every module that depends on it.
     const paths = Array.isArray(module && module.paths) ? module.paths : [];

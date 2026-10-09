@@ -180,7 +180,6 @@ msg.put("text", "Hello, user!");
 SSEPushManager.getInstance().push(sessionId, msg);
 
 // 全員へブロードキャスト
-// 全員へブロードキャスト
 SSEPushManager.getInstance().broadcast(msg);
 ```
 

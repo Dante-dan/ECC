@@ -14,7 +14,7 @@ working tree as a file the README can reference.
 The card is a committed artifact rather than a hosted image, so it renders from the
 repository itself and does not depend on a third-party endpoint staying up.
 
-## When to Use
+## When to Activate
 
 - Someone wants a usage figure visible in a README or docs page.
 - Someone asks for a shareable summary of their agent activity across tools.

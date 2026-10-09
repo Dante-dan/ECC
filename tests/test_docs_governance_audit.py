@@ -786,3 +786,99 @@ def test_audit_does_not_modify_repository_files(project: Path) -> None:
     }
     assert result.returncode == 1
     assert after == before
+
+
+@pytest.mark.parametrize("link", ("[guide](it's.md)", '[guide](it\'s.md "Guide)")'))
+def test_artifact_scope_reports_missing_apostrophe_destination(
+    project: Path, link: str
+) -> None:
+    (project / "index.md").write_text(link + "\n", encoding="utf-8")
+    result = run_audit(project, "artifacts")
+    assert result.returncode == 1, result.stdout
+    assert "Broken Markdown link" in result.stdout
+    assert "it's.md" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "link,filename",
+    (
+        (r"[guide](file\(1\).md)", "file(1).md"),
+        (r"[guide](file\).md)", "file).md"),
+        (r'[guide](file\(1\).md "Guide)")', "file(1).md"),
+        (r"[guide](<file\(1\).md>)", "file(1).md"),
+    ),
+)
+def test_artifact_scope_resolves_escaped_destination_parentheses(
+    project: Path, link: str, filename: str
+) -> None:
+    (project / filename).write_text("# Guide\n", encoding="utf-8")
+    (project / "index.md").write_text(link + "\n", encoding="utf-8")
+    result = run_audit(project, "artifacts")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("scope", ("artifacts", "full"))
+@pytest.mark.parametrize("usage", ("![diagram]", "![diagram][]", "![picture][diagram]"))
+def test_audit_reports_missing_reference_images(
+    project: Path, scope: str, usage: str
+) -> None:
+    (project / "index.md").write_text(
+        usage + "\n\n[diagram]: missing.png\n", encoding="utf-8"
+    )
+    result = run_audit(project, scope)
+    assert result.returncode == 1, result.stdout
+    assert "Broken Markdown link: 'index.md' -> 'missing.png'" in result.stdout
+
+
+@pytest.mark.parametrize("usage", ("![diagram]", "![diagram][]"))
+def test_artifact_scope_accepts_existing_reference_images(
+    project: Path, usage: str
+) -> None:
+    (project / "diagram.png").write_bytes(b"image fixture")
+    (project / "index.md").write_text(
+        usage + "\n\n[diagram]: diagram.png\n", encoding="utf-8"
+    )
+    result = run_audit(project, "artifacts")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_artifact_scope_ignores_escaped_reference_image_bracket(project: Path) -> None:
+    (project / "index.md").write_text(
+        r"!\[diagram]" + "\n\n[diagram]: missing.png\n", encoding="utf-8"
+    )
+    result = run_audit(project, "artifacts")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("mapping", (b"\xff", b"{invalid json"))
+def test_full_audit_reports_bad_role_map_and_continues_artifact_checks(
+    project: Path, mapping: bytes
+) -> None:
+    (project / ".governance").mkdir()
+    (project / ".governance/docs-map.json").write_bytes(mapping)
+    (project / "index.md").write_text("[missing](missing-guide.md)\n", encoding="utf-8")
+    result = run_audit(project, "full")
+    assert result.returncode == 1
+    assert "Cannot read .governance/docs-map.json" in result.stdout
+    assert "Broken Markdown link: 'index.md' -> 'missing-guide.md'" in result.stdout
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "link,filename",
+    (
+        (r"[guide](file\[1\].md)", "file[1].md"),
+        (r"[guide](it\'s.md)", "it's.md"),
+        (r'[guide](file\[1\].md "Guide)")', "file[1].md"),
+        (r"[guide](<it\'s.md>)", "it's.md"),
+        ("[guide][docs]\n\n[docs]: " + r"file\[1\].md", "file[1].md"),
+        ("[guide][docs]\n\n[docs]: " + r"it\'s.md", "it's.md"),
+    ),
+)
+def test_artifact_scope_resolves_escaped_bracket_and_apostrophe_filenames(
+    project: Path, link: str, filename: str
+) -> None:
+    (project / filename).write_text("# Guide\n", encoding="utf-8")
+    (project / "index.md").write_text(link + "\n", encoding="utf-8")
+    result = run_audit(project, "artifacts")
+    assert result.returncode == 0, result.stdout + result.stderr

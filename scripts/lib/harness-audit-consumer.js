@@ -245,6 +245,7 @@ function globMatchesAnyPath(rootDir, scanRoot, pattern) {
       return false;
     }
     return entries.some(entry => {
+      if (entry.isSymbolicLink()) return false;
       if (entry.isDirectory() && IGNORED_SCAN_DIRS.has(entry.name)) return false;
       return visit(path.join(current, entry.name));
     });

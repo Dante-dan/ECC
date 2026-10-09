@@ -22,7 +22,7 @@ and latency. Savings depend on model, platform, cache eligibility, writes,
 retention, reuse and output volume. Runtime cache hits and savings for this skill
 are **unmeasured**; the examples below validate arithmetic without provider calls.
 
-## When to Use
+## When to Activate
 
 Use for repeated API requests that share authorized instructions, tools or
 reference material. First identify the exact provider endpoint, model, service

@@ -21,7 +21,6 @@
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const os = require('os');
 const {
   LOOPBACK_HOSTNAMES,
   buildAllowedHostnames,
@@ -30,6 +29,7 @@ const {
 } = require('./lib/loopback-guard');
 const { normalizeAgentTools } = require('./lib/agent-tools');
 const { readHooksConfig } = require('./lib/hooks-config');
+const { getClaudeDir } = require('./lib/utils');
 
 const DEFAULT_HOST = '127.0.0.1';
 
@@ -867,7 +867,7 @@ handleRoute();
           '<span class="act-pill act-pill-agent">Agent: ' + agentCount + '</span>' +
           '</div>';
         if (!entries.length) {
-          panel.innerHTML = summary + '<div class="act-empty">No recorded tool calls yet. This reads ~/.claude/metrics/tool-usage.jsonl, written by the session-activity-tracker PostToolUse hook. Requires that hook in the active session.</div>';
+          panel.innerHTML = summary + '<div class="act-empty">No recorded tool calls yet. This reads metrics/tool-usage.jsonl in the active ECC agent data directory, written by the session-activity-tracker PostToolUse hook. Requires that hook in the active session.</div>';
           return;
         }
         panel.innerHTML = summary + '<div class="act-feed">' + entries.map(rowHtml).join('') + '</div>';
@@ -930,7 +930,7 @@ function sendHtml(res, statusCode, html) {
 
 const MAX_ACTIVITY_LOG_BYTES = 256 * 1024;
 
-function loadActivity(limit = 200, logPath = path.join(os.homedir(), '.claude', 'metrics', 'tool-usage.jsonl')) {
+function loadActivity(limit = 200, logPath = path.join(getClaudeDir(), 'metrics', 'tool-usage.jsonl')) {
   let fd;
   let text;
   try {

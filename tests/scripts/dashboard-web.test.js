@@ -18,6 +18,38 @@ let testFailed = 0;
 const asyncTests = [];
 const REQUEST_TIMEOUT_MS = 5000;
 
+for (const override of ['ECC_AGENT_DATA_HOME', 'CLAUDE_CONFIG_DIR']) {
+  asyncTest(`activity HTTP feed reads real hook output with ${override}`, async () => {
+    const { spawnSync } = require('child_process');
+    const dir = createTempDir('ecc-activity-override-');
+    const saved = Object.fromEntries(['ECC_AGENT_DATA_HOME', 'CLAUDE_CONFIG_DIR', 'CURSOR_VERSION', 'CURSOR_PROJECT_DIR'].map(key => [key, process.env[key]]));
+    try {
+      for (const key of Object.keys(saved)) delete process.env[key];
+      process.env[override] = dir;
+      const payload = { session_id: `override-${override}`, tool_name: 'Read', tool_input: { file_path: 'fixture.txt' } };
+      const result = spawnSync(process.execPath, [path.resolve(__dirname, '../../scripts/hooks/session-activity-tracker.js')], {
+        input: JSON.stringify(payload), encoding: 'utf8', timeout: 10000, env: process.env,
+      });
+      assert.strictEqual(result.status, 0, result.stderr);
+      assert.ok(fs.existsSync(path.join(dir, 'metrics', 'tool-usage.jsonl')));
+      await withDashboardServer(async port => {
+        const response = await requestDashboard(port, { path: '/api/activity' });
+        assert.strictEqual(response.statusCode, 200);
+        const { entries } = JSON.parse(response.body);
+        assert.strictEqual(entries.length, 1);
+        assert.strictEqual(entries[0].session_id, payload.session_id);
+        assert.strictEqual(entries[0].tool_name, 'Read');
+      });
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      cleanup(dir);
+    }
+  });
+}
+
 test('renderHTML emits executable scripts without syntax errors', () => {
   const { renderHTML } = require(SCRIPT);
   const html = renderHTML({ agents: [], skills: [], commands: [], rules: [], mcps: [], hooks: [] });

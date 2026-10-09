@@ -65,14 +65,21 @@ function annotateFailure(displayPath, reason, output) {
 }
 
 function parseCounts(combined) {
-  const passedMatch = combined.match(/Passed:\s*(\d+)/);
-  const failedMatch = combined.match(/Failed:\s*(\d+)/);
-  if (passedMatch || failedMatch) {
-    return {
-      passed: passedMatch ? parseInt(passedMatch[1], 10) : 0,
-      failed: failedMatch ? parseInt(failedMatch[1], 10) : 0,
-      definite: true,
-    };
+  // Nested runner diagnostics may contain earlier summaries. The file's last
+  // standalone summary owns its totals; mentions inside diagnostics do not.
+  const summaries = [...combined.matchAll(/^[ \t]*(?:(?:[^\r\n:]+:[ \t]*)?Results:[ \t]*)?(Passed|Failed):[ \t]*(\d+)(?:[ \t]*,?[ \t]+(Passed|Failed):[ \t]*(\d+))?(?:[ \t]*,[ \t]*Skipped:[ \t]*\d+)?[ \t]*\r?$/gm)];
+  if (summaries.length) {
+    let passed = 0;
+    let failed = 0;
+    for (const summary of summaries) {
+      if (summary[1] === 'Passed') {
+        passed = Number(summary[2]);
+        failed = 0;
+      } else failed = Number(summary[2]);
+      if (summary[3] === 'Passed') passed = Number(summary[4]);
+      else if (summary[3] === 'Failed') failed = Number(summary[4]);
+    }
+    return { passed, failed, definite: true };
   }
   const lines = combined.split(/\r?\n/);
   let tapPassed = 0;
@@ -148,7 +155,10 @@ for (const testFile of testFiles) {
   if (stderr) console.log(stderr);
 
   const combined = `${stdout}\n${stderr}`;
-  const counts = parseCounts(combined);
+  // Counts belong to stdout when a suite prints its summary there. Stderr is
+  // diagnostic output and may quote the failing nested process verbatim.
+  const stdoutCounts = parseCounts(stdout);
+  const counts = stdoutCounts.definite ? stdoutCounts : parseCounts(stderr);
   const processFailed = Boolean(result.error) || result.status !== 0;
 
   let failureReason;

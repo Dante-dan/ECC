@@ -4,6 +4,14 @@ const { adaptAntigravityAgent } = require('./antigravity-agent');
 const { adaptCopilotAgent } = require('./copilot-agent');
 const { disableOpenCodeHookPluginRegistration, getDisabledOpenCodePluginContent } = require('./hook-consent');
 
+function rewriteCopilotWorkflowPaths(content, sourceRelativePath) {
+  if (!/\.md$/i.test(sourceRelativePath)) return content;
+  // Commands run from the installed project root. Rewrite only the supported
+  // helper entrypoint, leaving unrelated project scripts and URLs untouched.
+  return content.replace(/(^|[\s`"'(])scripts\/setup-package-manager\.js\b/g,
+    '$1.github/ecc/scripts/setup-package-manager.js');
+}
+
 function transformInstallContent(operation, content) {
   if (!operation.contentTransform) {
     return content;
@@ -12,7 +20,10 @@ function transformInstallContent(operation, content) {
     return adaptAntigravityAgent(content, operation.sourceRelativePath);
   }
   if (operation.contentTransform === 'copilot-agent-frontmatter') {
-    return adaptCopilotAgent(content, operation.sourceRelativePath);
+    return rewriteCopilotWorkflowPaths(adaptCopilotAgent(content, operation.sourceRelativePath), operation.sourceRelativePath);
+  }
+  if (operation.contentTransform === 'copilot-workflow-paths') {
+    return rewriteCopilotWorkflowPaths(content, operation.sourceRelativePath);
   }
   if (operation.contentTransform === 'opencode-disable-ecc-hooks') {
     return transformInstallContent({ ...operation, contentTransform: 'opencode-home-skills-path' },

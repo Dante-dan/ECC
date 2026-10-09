@@ -46,6 +46,37 @@ function run(result, filename = 'sample.test.js', actions = true) {
 }
 
 const tests = [
+  ['named suite summaries retain their actual totals', () => {
+    const result = run({ status: 0, stdout: 'eval-harness package: Results: Passed: 4, Failed: 0' });
+    assert.strictEqual(result.status, 0);
+    assert.ok(result.logs.some(line => /Passed:\s+4\s/.test(line)));
+  }],
+  ['named suite failure summaries cannot be lost with a successful exit', () => {
+    const result = run({ status: 0, stdout: 'capsule: Results: Passed: 3, Failed: 1' });
+    assert.strictEqual(result.status, 1);
+    assert.match(result.annotations[0], /reported 1 failed/);
+  }],
+  ['outer summary wins over a nested runner failure summary', () => {
+    const result = run({ status: 0, stdout: 'Passed: 0, Failed: 1\nPASS verifies nested failure\nResults: Passed: 4, Failed: 0' });
+    assert.strictEqual(result.status, 0);
+    assert.ok(result.logs.some(line => /Passed:\s+4\s/.test(line)));
+  }],
+  ['outer failure cannot be hidden by an earlier nested success', () => {
+    const result = run({ status: 0, stdout: 'Passed: 99, Failed: 0\nPassed: 2\nFailed: 1' });
+    assert.strictEqual(result.status, 1);
+    assert.ok(result.logs.some(line => /Passed:\s+2\s/.test(line)));
+    assert.match(result.annotations[0], /reported 1 failed/);
+  }],
+  ['diagnostic mentions of counts are not owned summaries', () => {
+    const result = run({ status: 0, stdout: 'Assertion fixture: Passed: 99, Failed: 7\nPassed: 3\nFailed: 0', stderr: 'Error fixture expected "Failed: 8"' });
+    assert.strictEqual(result.status, 0);
+    assert.ok(result.logs.some(line => /Passed:\s+3\s/.test(line)));
+  }],
+  ['stdout summary owns counts even when stderr quotes a nested summary', () => {
+    const result = run({ status: 0, stdout: 'Passed: 3, Failed: 0', stderr: 'Passed: 0, Failed: 8' });
+    assert.strictEqual(result.status, 0);
+    assert.ok(result.logs.some(line => /Passed:\s+3\s/.test(line)));
+  }],
   ['nonzero exit overrides a zero-failure summary', () => {
     const result = run({ status: 1, stdout: 'Passed: 2, Failed: 0', stderr: 'Error: late crash' });
     assert.strictEqual(result.status, 1);

@@ -16,10 +16,16 @@ const rates = { input: 3, write: 3.75, read: 0.3, output: 15, storage: 1 };
 const usage = { uncached: 20000, written: 10000, read: 90000, output: 20000, storageTokenHours: 0 };
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-10, `${actual} != ${expected}`);
 let passed = 0;
+let failed = 0;
 function test(name, fn) {
-  fn();
-  passed += 1;
-  console.log(`PASS ${name}`);
+  try {
+    fn();
+    passed += 1;
+    console.log(`PASS ${name}`);
+  } catch (error) {
+    failed += 1;
+    console.error(`FAIL ${name}\n${error.stack || error.message}`);
+  }
 }
 
 test('ten-request example charges a write premium and unchanged output', () => {
@@ -64,4 +70,6 @@ test('canonical module and package both distribute the skill', () => {
   assert.ok(modules.modules.find(module => module.id === 'agentic-patterns').paths.includes('skills/prompt-caching-strategy'));
   assert.ok(pkg.files.includes('skills/prompt-caching-strategy/'));
 });
-console.log(`${passed}/${passed} offline prompt caching checks passed; runtime cache hits unmeasured.`);
+console.log('Offline prompt caching checks; runtime cache hits unmeasured.');
+console.log(`Passed: ${passed}, Failed: ${failed}`);
+process.exitCode = failed ? 1 : 0;

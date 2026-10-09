@@ -16,7 +16,7 @@ REFERENCE_DEFINITION_RE = re.compile(
     """
 )
 REFERENCE_USAGE_RE = re.compile(
-    r"(?<![!\\])\[(?P<text>[^\]\n]+)\](?:\[(?P<label>[^\]\n]*)\])?"
+    r"(?<![\\])\[(?P<text>[^\]\n]+)\](?:\[(?P<label>[^\]\n]*)\])?"
 )
 EXTERNAL_URI_RE = re.compile(
     r"^(?:[A-Za-z][A-Za-z0-9+.-]*://|(?:data|doi|geo|irc|magnet|mailto|news|sms|tel|urn):)",
@@ -111,7 +111,18 @@ def inline_link_targets(text: str) -> list[str]:
                 elif character == quote:
                     quote = None
                 continue
-            if character in {"'", '"'}:
+            if escaped:
+                escaped = False
+                continue
+            if character == "\\":
+                escaped = True
+                continue
+            if (
+                character in {"'", '"'}
+                and depth == 0
+                and end > start
+                and text[end - 1].isspace()
+            ):
                 quote = character
                 continue
             if character == "(":
@@ -181,6 +192,8 @@ def normalize_link_target(raw: str) -> str | None:
         )
         if title:
             target = target[: title.start()]
+    # Unescape supported Markdown punctuation before Windows path separators.
+    target = re.sub(r"\\([()\[\]'])", r"\1", target)
     target = unquote(target.split("#", 1)[0].split("?", 1)[0]).replace("\\", "/")
     if not target or (target.startswith("//") and not is_unc_path):
         return None
