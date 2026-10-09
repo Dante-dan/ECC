@@ -51,11 +51,11 @@ cat >> ~/.hermes/config.yaml <<EOF
 hooks:
   pre_tool_call:
     - matcher: "patch|write_file|edit|write|apply_patch|str_replace_editor"
-      command: "python3 $HOOK_DIR/ecc-config-protection.py"
+      command: "python3 $HOOK_DIR/config-protection.py"
       timeout: 10
   post_tool_call:
     - matcher: "patch|write_file|edit|write|apply_patch|str_replace_editor"
-      command: "python3 $HOOK_DIR/ecc-check-console-log.py"
+      command: "python3 $HOOK_DIR/check-console-log.py"
       timeout: 10
 EOF
 ```
@@ -81,7 +81,7 @@ real target (the hook only blocks edits to configs that already exist):
 ```bash
 T=$(mktemp -d) && touch "$T/eslint.config.mjs"
 echo "{\"hook_event_name\":\"pre_tool_call\",\"tool_name\":\"patch\",\"tool_input\":{\"path\":\"$T/eslint.config.mjs\",\"old_string\":\"a\",\"new_string\":\"b\"}}" \
-  | python3 ~/.hermes/hooks/ecc-config-protection.py
+  | python3 ~/.hermes/hooks/hermes/config-protection.py
 # {"decision": "block", "reason": "BLOCKED: modifying eslint.config.mjs ..."}
 ```
 
