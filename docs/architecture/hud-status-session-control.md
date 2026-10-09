@@ -82,9 +82,14 @@ project into before ECC grows a dedicated full-screen HUD.
 ## State Store Concurrency And Recovery
 
 ECC's file-backed state store serializes each synchronous query or transaction
-with a sibling `<database>.ecc-state.lock` file. It reloads the latest database
-under that lock and publishes successful writes before releasing it. Queries
-use one snapshot; closing a handle never writes an older snapshot back.
+with a sibling `<database>.ecc-state.lock` file. It checks the current database
+under that lock and publishes successful writes before releasing it. A handle
+can reuse its last successful read snapshot when the file identity, size, and
+modification/change timestamps match. Fixed SELECTs in the query API avoid
+reloading or exporting an unchanged database; query results are still computed
+afresh. Generic SQL, transactions, exports, and failed operations invalidate
+reuse. Changes from another writer trigger a reload on the next operation.
+Queries use one snapshot; closing a handle never writes an older snapshot back.
 All concurrent writers must use this adapter; older ECC versions and external
 SQLite writers do not participate in this locking protocol.
 

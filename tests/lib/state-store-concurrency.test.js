@@ -101,6 +101,8 @@ async function run() {
         '--title', 'Task saved while dashboard is open', '--db', dbPath, '--json']);
       const result = await withCleanup(() => cli.completion(), [() => cli.stop()]);
       assert.strictEqual(result.status, 0, result.stderr);
+      assert.ok(reader.getWorkItemById('cli-task'), 'A warm reader must observe the other process\'s commit');
+      assert.strictEqual(reader.listWorkItems().totalCount, 1);
     }, [() => reader.close()]);
     assert.ok((await readItems(dbPath)).some(item => item.id === 'cli-task'),
       'Closing the older reader must not remove the CLI task');

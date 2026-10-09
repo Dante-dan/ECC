@@ -27,9 +27,9 @@ function stateStorePathError(targetPath, detail) {
   return new Error(`Unsafe state-store path '${targetPath}': ${detail}`);
 }
 
-function lstatIfPresent(targetPath) {
+function lstatIfPresent(targetPath, options) {
   try {
-    return fs.lstatSync(targetPath);
+    return fs.lstatSync(targetPath, options);
   } catch (error) {
     if (error && error.code === 'ENOENT') {
       return null;
@@ -100,8 +100,8 @@ function ensurePrivateDirectory(directoryPath) {
   return absolutePath;
 }
 
-function assertSafeDatabaseFile(dbPath) {
-  const stats = lstatIfPresent(dbPath);
+function assertSafeDatabaseFile(dbPath, options) {
+  const stats = lstatIfPresent(dbPath, options);
   assertNotSymlink(dbPath, stats);
   if (stats && !stats.isFile()) {
     throw stateStorePathError(dbPath, 'database path is not a regular file');
@@ -114,14 +114,23 @@ function readDatabaseFile(dbPath) {
   const noFollow = fs.constants.O_NOFOLLOW || 0;
   const fileDescriptor = fs.openSync(dbPath, fs.constants.O_RDONLY | noFollow);
   try {
-    const stats = fs.fstatSync(fileDescriptor);
+    const stats = fs.fstatSync(fileDescriptor, { bigint: true });
     if (!stats.isFile()) {
       throw stateStorePathError(dbPath, 'database path is not a regular file');
     }
-    return fs.readFileSync(fileDescriptor);
+    return { bytes: fs.readFileSync(fileDescriptor), identity: stats };
   } finally {
     fs.closeSync(fileDescriptor);
   }
+}
+
+function sameDatabaseSnapshot(left, right) {
+  if (!left || !right || left.ino !== right.ino) return false;
+  // Windows path stats can omit the device reported by the open descriptor.
+  const sameDevice = left.dev === right.dev
+    || (process.platform === 'win32' && (left.dev === 0n || right.dev === 0n));
+  return sameDevice && left.size === right.size
+    && left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs;
 }
 
 function syncDirectory(directoryPath) {
@@ -202,7 +211,7 @@ function resolveStateStorePath(options = {}) {
  * IMPORTANT: sql.js db.export() implicitly ends any active transaction, so
  * we must defer all disk writes until after the transaction commits.
  */
-function wrapSqlJsDatabase(SQL, dbPath) {
+function wrapSqlJsDatabase(SQL, dbPath, trustedReads = new WeakSet()) {
   let rawDb = null;
   let closed = false;
   let inSnapshot = false;
@@ -210,11 +219,17 @@ function wrapSqlJsDatabase(SQL, dbPath) {
   let inTransaction = false;
   let needsSnapshotComparison = false;
   let snapshotBytes = null;
+  let readCacheIdentity = null;
+  let cacheableSnapshot = false;
 
   function reload() {
+    const cachedIdentity = readCacheIdentity;
+    readCacheIdentity = null;
     if (dbPath === ':memory:' && rawDb) return;
-    const bytes = dbPath !== ':memory:' && assertSafeDatabaseFile(dbPath)
-      ? readDatabaseFile(dbPath) : undefined;
+    const current = dbPath !== ':memory:' ? assertSafeDatabaseFile(dbPath, { bigint: true }) : null;
+    if (rawDb && sameDatabaseSnapshot(cachedIdentity, current)) return cachedIdentity;
+    const snapshot = current ? readDatabaseFile(dbPath) : null;
+    const bytes = snapshot ? snapshot.bytes : undefined;
     // sql.js can use its input buffer as writable backing storage.
     const originalBytes = bytes ? Buffer.from(bytes) : null;
     const latest = new SQL.Database(bytes);
@@ -234,6 +249,7 @@ function wrapSqlJsDatabase(SQL, dbPath) {
     }
     rawDb = latest;
     snapshotBytes = originalBytes;
+    return snapshot && snapshot.identity;
   }
 
   // Hold one lock from reload through commit. Nested statements and public
@@ -242,10 +258,11 @@ function wrapSqlJsDatabase(SQL, dbPath) {
     if (closed) throw new Error('State store is closed');
     if (inSnapshot) return callback();
     const execute = () => {
-      reload();
+      const identity = reload();
       inSnapshot = true;
       dirty = false;
       needsSnapshotComparison = false;
+      cacheableSnapshot = true;
       try {
         const result = callback();
         if (result && typeof result.then === 'function') {
@@ -262,18 +279,29 @@ function wrapSqlJsDatabase(SQL, dbPath) {
             writeDatabaseFileAtomic(dbPath, data);
           }
         }
+        // Only a successful snapshot of trusted SELECTs can retain its handle.
+        // Export and generic SQL may reset connection settings or alter state;
+        // those paths must reload before the next operation, even on failure.
+        if (cacheableSnapshot && !dirty && !needsSnapshotComparison) readCacheIdentity = identity;
         return result;
       } finally {
         inSnapshot = false;
         dirty = false;
         needsSnapshotComparison = false;
+        cacheableSnapshot = false;
       }
     };
-    return dbPath === ':memory:' ? execute() : withStateStoreLock(dbPath, execute);
+    try {
+      return dbPath === ':memory:' ? execute() : withStateStoreLock(dbPath, execute);
+    } catch (error) {
+      readCacheIdentity = null;
+      throw error;
+    }
   }
 
-  function query(sql, positionalArgs, firstOnly) {
+  function query(sql, positionalArgs, firstOnly, trustedRead) {
     return withSnapshot(() => {
+      if (!trustedRead) needsSnapshotComparison = true;
       const stmt = rawDb.prepare(sql);
       try {
         if (positionalArgs.length === 1 && typeof positionalArgs[0] !== 'object') {
@@ -281,7 +309,6 @@ function wrapSqlJsDatabase(SQL, dbPath) {
         } else if (positionalArgs.length > 1) {
           stmt.bind(positionalArgs);
         }
-        needsSnapshotComparison = true;
         if (firstOnly) return stmt.step() ? stmt.getAsObject() : null;
         const rows = [];
         while (stmt.step()) rows.push(stmt.getAsObject());
@@ -294,6 +321,7 @@ function wrapSqlJsDatabase(SQL, dbPath) {
 
   function runStatement(sql, namedParams) {
     return withSnapshot(() => {
+      needsSnapshotComparison = true;
       const stmt = rawDb.prepare(sql);
       try {
         if (namedParams && typeof namedParams === 'object' && !Array.isArray(namedParams)) {
@@ -310,6 +338,7 @@ function wrapSqlJsDatabase(SQL, dbPath) {
 
   function transact(fn, args) {
     if (inTransaction) throw new Error('Nested state-store transactions are not supported');
+    cacheableSnapshot = false;
     rawDb.run('BEGIN');
     inTransaction = true;
     const previouslyDirty = dirty;
@@ -341,6 +370,7 @@ function wrapSqlJsDatabase(SQL, dbPath) {
     withSnapshot,
     exec(sql) {
       return withSnapshot(() => {
+        needsSnapshotComparison = true;
         rawDb.run(sql);
         dirty = true;
       });
@@ -348,25 +378,26 @@ function wrapSqlJsDatabase(SQL, dbPath) {
 
     pragma(pragmaStr) {
       return withSnapshot(() => {
-        rawDb.run(`PRAGMA ${pragmaStr}`);
         needsSnapshotComparison = true;
+        rawDb.run(`PRAGMA ${pragmaStr}`);
       });
     },
 
     prepare(sql) {
-      return {
+      const statement = {
         all(...positionalArgs) {
-          return query(sql, positionalArgs, false);
+          return query(sql, positionalArgs, false, trustedReads.has(statement));
         },
 
         get(...positionalArgs) {
-          return query(sql, positionalArgs, true);
+          return query(sql, positionalArgs, true, trustedReads.has(statement));
         },
 
         run(namedParams) {
           return runStatement(sql, namedParams);
         },
       };
+      return statement;
     },
 
     transaction(fn) {
@@ -377,6 +408,7 @@ function wrapSqlJsDatabase(SQL, dbPath) {
       if (inSnapshot) throw new Error('Cannot close a state store during an operation');
       if (closed) return;
       closed = true;
+      readCacheIdentity = null;
       if (rawDb) rawDb.close();
     },
   };
@@ -384,18 +416,19 @@ function wrapSqlJsDatabase(SQL, dbPath) {
   return db;
 }
 
-function openDatabase(SQL, dbPath) {
+function openDatabase(SQL, dbPath, trustedReads) {
   if (dbPath !== ':memory:') {
     ensurePrivateDirectory(path.dirname(dbPath));
   }
 
-  return wrapSqlJsDatabase(SQL, dbPath);
+  return wrapSqlJsDatabase(SQL, dbPath, trustedReads);
 }
 
 async function createStateStore(options = {}) {
   const dbPath = resolveStateStorePath(options);
   const SQL = await initSqlJs();
-  const db = openDatabase(SQL, dbPath);
+  const trustedReads = new WeakSet();
+  const db = openDatabase(SQL, dbPath, trustedReads);
   let appliedMigrations;
   try {
     appliedMigrations = db.withSnapshot(() => applyMigrations(db));
@@ -403,7 +436,13 @@ async function createStateStore(options = {}) {
     try { db.close(); } catch (closeError) { recordCleanupError(error, 'closeError', closeError); }
     throw error;
   }
-  const queryApi = createQueryApi(db);
+  const queryApi = createQueryApi(db, {
+    prepareRead(sql) {
+      const statement = db.prepare(sql);
+      trustedReads.add(statement);
+      return statement;
+    },
+  });
   const synchronizedQueries = Object.fromEntries(Object.entries(queryApi)
     .map(([name, query]) => [name, (...args) => db.withSnapshot(() => query(...args))]));
 
