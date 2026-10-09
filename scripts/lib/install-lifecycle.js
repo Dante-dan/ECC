@@ -14,8 +14,6 @@ const { writeFileNoFollow: guardedWriteFile } = require('./install/guarded-write
 const { withOpenCodeInstallLocks } = require('./install/opencode-install-lock');
 const { isCodexUserConfig } = require('./install/codex-user-config');
 const {
-  disableOpenCodeHookPluginRegistration,
-  getDisabledOpenCodePluginContent,
   getRecordedHookConsent,
   withHookConsent,
 } = require('./install/hook-consent');
@@ -41,8 +39,7 @@ const {
   updateSettingsAtomic,
   validateManagedHooks,
 } = require('./install/claude-settings');
-const { adaptAntigravityAgent } = require('./install/antigravity-agent');
-const { adaptCopilotAgent } = require('./install/copilot-agent');
+const { transformInstallContent } = require('./install/content-transform');
 const { buildInstallIndex, rewriteRelativeLinks } = require('./install/link-rewrite');
 const { getInstallTargetAdapter, listInstallTargetAdapters } = require('./install-targets/registry');
 const { resolveInvocationEnvironment } = require('./invocation-environment');
@@ -233,27 +230,8 @@ function buildLinkIndexForOperations(operations, trustedRoot) {
   return buildInstallIndex(mappings);
 }
 
-function transformCopyFileContent(operation, content) {
-  if (!operation.contentTransform) {
-    return content;
-  }
-  if (operation.contentTransform === 'antigravity-agent-frontmatter') {
-    return adaptAntigravityAgent(content, operation.sourceRelativePath);
-  }
-  if (operation.contentTransform === 'opencode-disable-ecc-hooks') {
-    return disableOpenCodeHookPluginRegistration(content, operation.sourceRelativePath);
-  }
-  if (operation.contentTransform === 'opencode-disable-plugin-entrypoint') {
-    return getDisabledOpenCodePluginContent();
-  }
-  if (operation.contentTransform === 'copilot-agent-frontmatter') {
-    return adaptCopilotAgent(content, operation.sourceRelativePath);
-  }
-  throw new Error(`Unknown install content transform: ${operation.contentTransform}`);
-}
-
 function getExpectedCopyFileContent(operation, content, linkIndex) {
-  const transformed = transformCopyFileContent(operation, content);
+  const transformed = transformInstallContent(operation, content);
   if (!linkIndex || !operation.sourceRelativePath || !isMarkdownPath(operation.destinationPath)) {
     return transformed;
   }
