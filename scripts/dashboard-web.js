@@ -54,9 +54,7 @@ const PORT = parsePort(process.argv[2] || process.env.ECC_DASHBOARD_PORT || '345
 const HOST = resolveDashboardHost();
 const ROOT = path.resolve(__dirname, '..');
 
-function readFrontmatter(p) {
-  try {
-    const c = fs.readFileSync(p, 'utf8');
+function parseFrontmatter(c) {
     const m = c.match(/^---\n([\s\S]*?)\n---/);
     if (!m) return {};
     const fm = {};
@@ -73,9 +71,18 @@ function readFrontmatter(p) {
     }
     fm._body = c.replace(/^---[\s\S]*?---\n*/, '').trim();
     return fm;
-  } catch { return {}; }
 }
-function readSkill(p) { try { const c = fs.readFileSync(p, 'utf8'); const fm = readFrontmatter(p); return { d: fm.description || '', b: c.replace(/^---[\s\S]*?---\n*/, '').trim() }; } catch { return { d: '', b: '' }; } }
+function readFrontmatter(p) {
+  try { return parseFrontmatter(fs.readFileSync(p, 'utf8')); }
+  catch { return {}; }
+}
+function readSkill(p) {
+  try {
+    const c = fs.readFileSync(p, 'utf8');
+    const fm = parseFrontmatter(c);
+    return { d: fm.description || '', b: c.replace(/^---[\s\S]*?---\n*/, '').trim() };
+  } catch { return { d: '', b: '' }; }
+}
 
 function loadAgents(_root) {
   const root = _root || ROOT;
