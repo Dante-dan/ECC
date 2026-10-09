@@ -90,11 +90,11 @@ run('blocks edits to every protected config name', () => {
   }
 });
 
-run('blocks case-variant names (case-insensitive filesystems)', () => {
+run('blocks existing case-variant protected names on every filesystem', () => {
   const target = path.join(tmp, 'ESLINT.CONFIG.MJS');
-  fs.writeFileSync(path.join(tmp, 'eslint.config.mjs'), 'export default {}\n');
-  // On a case-sensitive filesystem the variant is a distinct name; the hook
-  // must still refuse it so a macOS/Windows rename cannot smuggle an edit.
+  fs.writeFileSync(target, 'export default {}\n');
+  // The exact variant must exist: first-time config creation is allowed.
+  assert.ok(fs.existsSync(target), 'the probed protected file must exist');
   const { stdout } = runHook(GUARD, {
     hook_event_name: 'pre_tool_call',
     tool_name: 'patch',
@@ -248,13 +248,21 @@ run('hermes-hooks module installs via the real installer and the landed guard bl
   assert.ok(fs.existsSync(landed), 'guard must land under ~/.hermes/hooks/hermes/');
   assert.ok(fs.existsSync(path.join(home, '.hermes', 'docs', 'HERMES-HOOKS.md')), 'doc must land');
   const t = fs.mkdtempSync(path.join(os.tmpdir(), 'ecc-guard-'));
-  const target = path.join(t, 'eslint.config.mjs');
+  const target = path.join(t, 'ESLINT.CONFIG.MJS');
   fs.writeFileSync(target, 'export default {}\n');
   const g = spawnSync('python3', [landed], {
     input: JSON.stringify({ hook_event_name: 'pre_tool_call', tool_name: 'patch', tool_input: { path: target, old_string: 'a', new_string: 'b' } }),
     encoding: 'utf8', timeout: 15000,
   });
   assert.ok((g.stdout || '').includes('"decision": "block"'), 'landed guard must block');
+  fs.unlinkSync(target);
+  const bootstrap = spawnSync('python3', [landed], {
+    input: JSON.stringify({ hook_event_name: 'pre_tool_call', tool_name: 'patch', tool_input: { path: target } }),
+    encoding: 'utf8', timeout: 15000,
+  });
+  assert.strictEqual(bootstrap.status, 0, bootstrap.stderr);
+  assert.strictEqual(bootstrap.stdout.trim(), '', 'first-time config creation remains allowed');
+
   fs.rmSync(home, { recursive: true, force: true });
   fs.rmSync(t, { recursive: true, force: true });
 });

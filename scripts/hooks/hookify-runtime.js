@@ -212,21 +212,60 @@ function normalizeRule(frontmatter, message, sourcePath) {
   });
 }
 
-function readRuleFile(filePath) {
-  const stat = fs.lstatSync(filePath);
-  if (stat.isSymbolicLink()) throw new Error('symbolic links are not loaded');
-  if (!stat.isFile()) throw new Error('rule path is not a regular file');
-  if (stat.size > MAX_RULE_BYTES) throw new Error('rule exceeds ' + MAX_RULE_BYTES + ' bytes');
+function sameRuleIdentity(left, right) {
+  return ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink'].every(key => left[key] === right[key]);
+}
 
-  const noFollow = fs.constants.O_NOFOLLOW || 0;
-  const fd = fs.openSync(filePath, fs.constants.O_RDONLY | noFollow);
+function sameRuleSnapshot(left, right) {
+  return sameRuleIdentity(left, right)
+    && ['size', 'mtimeNs', 'ctimeNs'].every(key => left[key] === right[key]);
+}
+
+function assertRuleSnapshot(filePath, fd, openedStat, directoryStat) {
+  const directory = fs.lstatSync(path.dirname(filePath), { bigint: true });
+  const current = fs.lstatSync(filePath, { bigint: true });
+  if (directory.isSymbolicLink() || !directory.isDirectory()
+    || !sameRuleIdentity(directory, directoryStat)
+    || current.isSymbolicLink() || !current.isFile()
+    || !sameRuleSnapshot(current, openedStat)
+    || !sameRuleSnapshot(fs.fstatSync(fd, { bigint: true }), openedStat)) {
+    throw new Error('rule file or directory changed while reading');
+  }
+}
+
+function readBoundedRule(fd) {
+  const bytes = Buffer.alloc(MAX_RULE_BYTES + 1);
+  let total = 0;
+  while (total < bytes.length) {
+    const count = fs.readSync(fd, bytes, total, bytes.length - total, total);
+    if (count === 0) break;
+    total += count;
+  }
+  if (total > MAX_RULE_BYTES) throw new Error('rule exceeds ' + MAX_RULE_BYTES + ' bytes');
+  return bytes.subarray(0, total);
+}
+
+function readRuleFile(filePath, directoryStat) {
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0)
+    | (fs.constants.O_NONBLOCK || 0);
+  let fd;
   try {
-    const openedStat = fs.fstatSync(fd);
-    if (!openedStat.isFile() || openedStat.size > MAX_RULE_BYTES) {
-      throw new Error('rule exceeds ' + MAX_RULE_BYTES + ' bytes or is not a regular file');
+    fd = fs.openSync(filePath, flags);
+  } catch (error) {
+    if (error.code === 'ELOOP') throw new Error('symbolic links are not loaded');
+    throw error;
+  }
+  try {
+    const openedStat = fs.fstatSync(fd, { bigint: true });
+    if (!openedStat.isFile()) throw new Error('rule path is not a regular file');
+    if (openedStat.size > BigInt(MAX_RULE_BYTES)) {
+      throw new Error('rule exceeds ' + MAX_RULE_BYTES + ' bytes');
     }
-    const source = fs.readFileSync(fd, 'utf8');
-    const document = extractFrontmatter(source);
+    assertRuleSnapshot(filePath, fd, openedStat, directoryStat);
+    const bytes = readBoundedRule(fd);
+    assertRuleSnapshot(filePath, fd, openedStat, directoryStat);
+    if (BigInt(bytes.length) !== openedStat.size) throw new Error('rule size changed while reading');
+    const document = extractFrontmatter(bytes.toString('utf8'));
     if (!document) throw new Error('missing YAML frontmatter');
     const frontmatter = parseRuleFrontmatter(document.yaml);
     return normalizeRule(frontmatter, document.message, filePath);
@@ -241,9 +280,10 @@ function loadRules(projectRoot, options = {}) {
   const excludedPaths = options.excludedPaths || new Set();
   const rulesDir = path.join(path.resolve(projectRoot), '.claude');
   let entries;
+  let directoryStat;
   try {
-    const dirStat = fs.lstatSync(rulesDir);
-    if (dirStat.isSymbolicLink() || !dirStat.isDirectory()) {
+    directoryStat = fs.lstatSync(rulesDir, { bigint: true });
+    if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) {
       return { rules, diagnostics: [diagnostic('.claude', 'rule directory must be a real directory')] };
     }
     entries = fs.readdirSync(rulesDir, { withFileTypes: true });
@@ -269,7 +309,7 @@ function loadRules(projectRoot, options = {}) {
   }
   for (const entry of eligibleCandidates.slice(0, MAX_RULES)) {
     try {
-      const rule = readRuleFile(path.join(rulesDir, entry.name));
+      const rule = readRuleFile(path.join(rulesDir, entry.name), directoryStat);
       if (rule.enabled) rules.push(rule);
     } catch (error) {
       diagnostics.push(diagnostic(entry.name, error.message));
