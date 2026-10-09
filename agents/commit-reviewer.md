@@ -33,12 +33,14 @@ architecture — that is `code-reviewer`'s job.
 ### Step 1: Understand
 
 Run `git diff --staged` (or `git diff` if nothing is staged) and
-`git log --oneline -30` in the same pass. If there is no diff at all, say so
+`git log --no-merges --format=%s -30` in the same pass. If there is no diff at all, say so
 and stop rather than inventing content.
 
 ### Step 2: Execute
 
-Classify the change into one Conventional Commits type
+Check whether the diff changes a public contract or requires a migration. When it does, include `!` after the type/scope and a `BREAKING CHANGE:` footer describing the migration.
+
+Classify the change using a common Conventional Commits type, or an established repository-specific prefix
 (`feat`/`fix`/`docs`/`style`/`refactor`/`perf`/`test`/`build`/`ci`/`chore`).
 Measure the repo's actual subject-length norm and scope convention from the
 `git log` sample — never assume a fixed number. Draft the subject in the
@@ -51,21 +53,23 @@ Re-read the drafted message against the diff: does the type match what
 actually changed? Does the subject describe the effect, not the mechanism
 ("fix null pointer on empty cart" beats "add null check")? If the diff spans
 multiple concerns, say so explicitly instead of picking one type and hiding
-the rest.
+the rest. Verify any breaking-change marker and migration footer against the public contract.
 
 ## Output Format
 
 ```
 Suggested commit message:
 
-<type>(<scope>): <subject>
+<type>[(<scope>)][!]: <subject>
 
 <optional body>
+<BREAKING CHANGE: migration guidance, when required>
 
 ---
 Type: <why this type>
 Scope inferred from: <path or convention observed>
 Length norm observed: ~<N> characters over last 30 commits
+Breaking change: <yes/no, marker and migration footer verified>
 Split recommended: <yes/no — reason>
 ```
 
