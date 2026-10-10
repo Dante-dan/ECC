@@ -25,7 +25,15 @@ let raw = '';
 // so we normalize the candidate token to lowercase before matching.
 // See https://git-scm.com/docs/git-config — "The variable names are
 // case-insensitive."
-const GIT_CONFIG_KEY_PREFIX = 'core.hookspath=';
+function isHookRedirectConfigKey(key) {
+  const normalized = key.toLowerCase();
+  return normalized === 'core.hookspath' || normalized === 'include.path'
+    || /^includeif\..*\.path$/.test(normalized);
+}
+
+function isHookRedirectSetting(setting) {
+  return isHookRedirectConfigKey(setting.split('=', 1)[0]);
+}
 
 const COMMIT_OPTIONS_WITH_VALUE = new Set([
   '-m',
@@ -189,7 +197,7 @@ function gitEnvironmentOverride(environment, budget) {
       const key = environment.get(`GIT_CONFIG_KEY_${i}`);
       if (key === undefined || !environment.has(`GIT_CONFIG_VALUE_${i}`)) { complete = false; break; }
       budget.spend(key.length + 1);
-      override ||= key.toLowerCase() === 'core.hookspath';
+      override ||= isHookRedirectConfigKey(key);
     }
     if (complete && override) return true;
   }
@@ -201,7 +209,7 @@ function gitEnvironmentOverride(environment, budget) {
     for (const command of scanShell(parameters, budget).commands) {
       for (const word of command.words) {
         budget.spend(word.value.length + 1);
-        if (word.value.toLowerCase().startsWith(GIT_CONFIG_KEY_PREFIX)) return true;
+        if (isHookRedirectSetting(word.value)) return true;
       }
     }
   }
@@ -219,8 +227,9 @@ function checkGitWords(words, budget, start = 0, environmentOverride = false) {
     if (value === '-c' || value === '--config-env') {
       const setting = words[index + 1]?.value || '';
       budget.spend(setting.length + 1);
-      override ||= setting.toLowerCase().startsWith(GIT_CONFIG_KEY_PREFIX);
-    } else if (value.toLowerCase().startsWith(`-c${GIT_CONFIG_KEY_PREFIX}`) || value.toLowerCase().startsWith(`--config-env=${GIT_CONFIG_KEY_PREFIX}`)) override = true;
+      override ||= isHookRedirectSetting(setting);
+    } else if (value.startsWith('-c')) override ||= isHookRedirectSetting(value.slice(2));
+    else if (value.startsWith('--config-env=')) override ||= isHookRedirectSetting(value.slice('--config-env='.length));
     if (GIT_GLOBAL_VALUES.has(value)) index++;
   }
   const command = words[index]?.value;
@@ -358,6 +367,22 @@ function executableWords(words, budget, inherited = new Map(), callerValues = in
         const flag = words[i].value;
         budget.spend(flag.length + 1);
         if (flag === '--') { i++; break; }
+        if (env && (flag === '-S' || flag === '--split-string'
+          || flag.startsWith('--split-string=') || flag.startsWith('-S'))) {
+          const separated = flag === '-S' || flag === '--split-string';
+          const payload = separated ? words[i + 1]?.value || ''
+            : flag.slice(flag.startsWith('--split-string=') ? '--split-string='.length : 2);
+          budget.spend(payload.length + 1);
+          const scan = scanShell(payload, budget);
+          // Only literal word splitting is understood here. Keep complex env
+          // syntax opaque rather than pretending to execute it as a shell.
+          if (scan.commands.length !== 1 || scan.commands[0].nested.length
+            || scan.commands[0].redirects.length || scan.commands[0].words.some(word => word.dynamic)) return suffix(i - 1);
+          // Pay for both slices and the expanded array before allocating them.
+          budget.spend(2 * words.length + scan.commands[0].words.length);
+          words = [...words.slice(0, i), ...scan.commands[0].words, ...words.slice(i + (separated ? 2 : 1))];
+          continue;
+        }
         if (env && (flag === '-i' || flag === '--ignore-environment')) resetEnvironment();
         if (env && (flag === '-u' || flag === '--unset')) resetEnvironment(words[i + 1]?.value || '');
         else if (env && flag.startsWith('--unset=')) resetEnvironment(flag.slice('--unset='.length));
