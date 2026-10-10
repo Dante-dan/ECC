@@ -2112,6 +2112,36 @@ for (const n of [0, 1, 2, 4]) {
   })) passed++; else failed++;
 }
 
+const quoteSplitPayload = payload => `'${payload.replace(/'/g, `'\\''`)}'`;
+const escapedSplitCases = [
+  ['unquoted escaped separators', 'git\\_commit\\_--no-verify', 2],
+  ['single-quoted literal separators', "'git\\_commit\\_--no-verify'", 0],
+  ['double-quoted escaped separators', '"git\\_commit\\_--no-verify"', 2],
+  ['mixed quoted escaped separators', 'git\\_commit\\_"--no-verify"', 2],
+  ['unsupported stop escape', 'printf ok\\c ignored', 2],
+  ['unsupported double-quoted stop escape', 'printf "ok\\c" ignored', 2],
+  ['single-quoted stop data', "printf '%s' 'ok\\c'", 0],
+  ['single-quoted separator data', "printf '%s' 'git\\_commit\\_--no-verify'", 0],
+  ['single-quoted newline format', "printf '%s\\n' 'git commit --no-verify'", 0],
+  ['unsupported newline escape', 'printf ok\\n', 2],
+  ['unsupported tab escape', 'printf ok\\t', 2],
+  ['unsupported escaped backslash', 'printf ok\\\\_', 2],
+  ['unsupported single-quoted backslash escape', "printf '%s' 'ok\\\\_'", 2],
+  ['unsupported single-quoted apostrophe escape', "printf '%s' 'ok\\'data'", 2],
+];
+for (const [name, payload, expected] of escapedSplitCases) {
+  for (const option of ['-S ', '-S', '--split-string=', '--split-string ']) {
+    if (test(`env escape boundary ${name}: ${option}`, () => {
+      const command = 'env ' + option + quoteSplitPayload(payload);
+      for (const input of [command, JSON.stringify({ tool_input: { command } })]) {
+        const result = runHook(input);
+        assert.strictEqual(result.code, expected, result.stderr);
+        if (expected === 2) assert.match(result.stderr, /Unsupported env split-string escape/);
+      }
+    })) passed++; else failed++;
+  }
+}
+
 console.log('─'.repeat(50));
 console.log(`Passed: ${passed}  Failed: ${failed}`);
 

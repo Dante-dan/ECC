@@ -266,6 +266,23 @@ function assignmentValues(prior, operand, append, dynamic, budget) {
   return [...values];
 }
 
+class UnsupportedEnvSplitEscape extends Error {}
+
+function validateEnvSplitEscapes(payload, budget) {
+  let quote = null;
+  for (let index = 0; index < payload.length; index++) {
+    budget.spend();
+    const character = payload[index];
+    // env -S has its own escapes. Only literal single-quoted backslashes
+    // (excluding env's \\ and \' escapes) agree with the shell scanner.
+    if (character === '\\' && (quote !== "'" || payload[index + 1] === '\\' || payload[index + 1] === "'")) {
+      throw new UnsupportedEnvSplitEscape();
+    }
+    if (character === "'" && quote !== '"') quote = quote === "'" ? null : "'";
+    else if (character === '"' && quote !== "'") quote = quote === '"' ? null : '"';
+  }
+}
+
 // Only explicit option grammars remove wrapper operands. Unknown launchers are
 // opaque/conservative, never guessed from a name found among data arguments.
 function executableWords(words, budget, inherited = new Map(), callerValues = inherited) {
@@ -373,6 +390,7 @@ function executableWords(words, budget, inherited = new Map(), callerValues = in
           const payload = separated ? words[i + 1]?.value || ''
             : flag.slice(flag.startsWith('--split-string=') ? '--split-string='.length : 2);
           budget.spend(payload.length + 1);
+          validateEnvSplitEscapes(payload, budget);
           const scan = scanShell(payload, budget);
           // Only literal word splitting is understood here. Keep complex env
           // syntax opaque rather than pretending to execute it as a shell.
@@ -726,6 +744,9 @@ function checkCommand(input) {
       }
     }
   } catch (error) {
+    if (error instanceof UnsupportedEnvSplitEscape) {
+      return { blocked: true, reason: 'BLOCKED: Unsupported env split-string escape; hook-bypass safety could not be established.' };
+    }
     if (!(error instanceof RangeError)) throw error;
     return { blocked: true, reason: 'BLOCKED: Shell analysis work budget exceeded; hook-bypass safety could not be established.' };
   }
