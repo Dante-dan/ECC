@@ -6,7 +6,9 @@
 
 const assert = require('assert');
 const { PassThrough } = require('stream');
-const { readStdinRaw } = require('../../scripts/hooks/hook-input');
+const { spawn } = require('child_process');
+const path = require('path');
+const { readStdinRaw, resolveStdinTimeout, DEFAULT_STDIN_TIMEOUT_MS } = require('../../scripts/hooks/hook-input');
 const { run: runConfigProtection } = require('../../scripts/hooks/config-protection');
 
 const TEST_STDIN_LIMIT = 1024;
@@ -53,6 +55,39 @@ async function readFromClosedStream(partialInput) {
         reject(error);
       }
     );
+  });
+}
+
+function withDeadline(promise) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('stdin read did not meet its deadline')), 1000);
+    promise.then(
+      result => { clearTimeout(timer); resolve(result); },
+      error => { clearTimeout(timer); reject(error); }
+    );
+  });
+}
+
+function runWithOpenStdin(script, args = [], input = '') {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(__dirname, '../../scripts/hooks', script), ...args], {
+      env: { ...process.env, ECC_HOOK_INPUT_TIMEOUT_MS: '40', ECC_HOOK_PROFILE: 'standard' },
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    let stderr = '';
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.stdout.resume();
+    child.stdin.on('error', () => {});
+    if (input) child.stdin.write(input);
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`${script} kept waiting for EOF`));
+    }, 1500);
+    child.on('error', error => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on('exit', code => { clearTimeout(timer); resolve({ code, stderr }); });
   });
 }
 
@@ -117,6 +152,68 @@ async function runTests() {
   )
     passed++;
   else failed++;
+
+  for (const [name, fn] of [
+    ['timeout configuration rejects invalid or overflowing timer delays', async () => {
+      for (const value of [undefined, '', 'no', '0', '-1', '1.5', '2147483648']) {
+        assert.strictEqual(resolveStdinTimeout(value), DEFAULT_STDIN_TIMEOUT_MS);
+      }
+      assert.strictEqual(resolveStdinTimeout('50'), 50);
+    }],
+    ['open empty stream settles as incomplete', async () => {
+      const stream = new PassThrough();
+      const result = await withDeadline(readStdinRaw(stream, { timeoutMs: 20 }));
+      assert.deepStrictEqual(result, { raw: '', truncated: true });
+      assert.strictEqual(stream.listenerCount('data'), 0);
+      stream.destroy();
+    }],
+    ['deadline preserves received input and safety hooks remain fail closed', async () => {
+      const stream = new PassThrough();
+      const pending = readStdinRaw(stream, { timeoutMs: 20 });
+      stream.write('{"tool_name":"Write","tool_input":{"file_path":".eslintrc.js"}}');
+      const result = await withDeadline(pending);
+      assert.strictEqual(result.truncated, true);
+      assert.strictEqual(runConfigProtection(result.raw, { truncated: result.truncated }).exitCode, 2);
+      stream.write('ignored after deadline');
+      assert.ok(!result.raw.includes('ignored'));
+      stream.destroy();
+    }],
+    ['deadline does not reset when more chunks arrive', async () => {
+      const stream = new PassThrough();
+      const pending = readStdinRaw(stream, { timeoutMs: 30 });
+      const writer = setInterval(() => stream.write('x'), 5);
+      try {
+        const result = await withDeadline(pending);
+        assert.strictEqual(result.truncated, true);
+      } finally {
+        clearInterval(writer);
+        stream.destroy();
+      }
+    }],
+    ['normal EOF cancels deadline and releases listeners', async () => {
+      const stream = new PassThrough();
+      const pending = readStdinRaw(stream, { timeoutMs: 20 });
+      stream.end('{}');
+      assert.deepStrictEqual(await pending, { raw: '{}', truncated: false });
+      assert.strictEqual(stream.listenerCount('data'), 0);
+      await new Promise(resolve => setTimeout(resolve, 40));
+    }],
+    ['hook entry points exit while parent holds stdin open', async () => {
+      for (const [script, args, expected, input] of [
+        ['run-with-flags.js', ['pre:write:doc-file-warning', 'scripts/hooks/doc-file-warning.js', 'standard,strict'], 0],
+        ['run-with-flags.js', ['pre:config-protection', 'scripts/hooks/config-protection.js', 'standard,strict'], 2, '{"tool_name":"Write","tool_input":{"file_path":".eslintrc.js"}}'],
+        ['pre-bash-dispatcher.js', [], 2],
+        ['post-bash-dispatcher.js', [], 0],
+        ['bash-hook-dispatcher.js', ['pre'], 2],
+        ['bash-hook-dispatcher.js', ['post'], 0]
+      ]) {
+        const result = await runWithOpenStdin(script, args, input);
+        assert.strictEqual(result.code, expected, `${script}: ${result.stderr}`);
+      }
+    }]
+  ]) {
+    if (await test(name, fn)) passed++; else failed++;
+  }
 
   console.log(`\nPassed: ${passed}`);
   console.log(`Failed: ${failed}\n`);

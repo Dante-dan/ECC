@@ -17,7 +17,7 @@ const { run: runCommandLog } = require('./post-bash-command-log');
 const { run: runPrCreated } = require('./post-bash-pr-created');
 const { run: runBuildComplete } = require('./post-bash-build-complete');
 
-const MAX_STDIN = 1024 * 1024;
+const { readStdinRaw, resolveMaxStdin } = require('./hook-input');
 
 const PRE_BASH_HOOKS = [
   {
@@ -71,21 +71,6 @@ const POST_BASH_HOOKS = [
     run: rawInput => runBuildComplete(rawInput),
   },
 ];
-
-function readStdinRaw() {
-  return new Promise(resolve => {
-    let raw = '';
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', chunk => {
-      if (raw.length < MAX_STDIN) {
-        const remaining = MAX_STDIN - raw.length;
-        raw += chunk.substring(0, remaining);
-      }
-    });
-    process.stdin.on('end', () => resolve(raw));
-    process.stdin.on('error', () => resolve(raw));
-  });
-}
 
 function normalizeHookResult(previousRaw, output) {
   if (typeof output === 'string' || Buffer.isBuffer(output)) {
@@ -183,7 +168,18 @@ function runPostBash(rawInput) {
 
 async function main() {
   const mode = process.argv[2];
-  const raw = await readStdinRaw();
+  const { raw, truncated } = await readStdinRaw(process.stdin, {
+    maxStdin: resolveMaxStdin(process.env.ECC_HOOK_INPUT_MAX_BYTES)
+  });
+  if (truncated) {
+    if (mode !== 'post' && isHookEnabled('pre:bash:dispatcher', {
+      profiles: 'minimal,standard,strict'
+    })) {
+      process.stderr.write('[Hook] Incomplete stdin; blocking because safety checks require the complete request\n');
+      process.exitCode = 2;
+    }
+    return;
+  }
 
   const result = mode === 'post'
     ? runPostBash(raw)

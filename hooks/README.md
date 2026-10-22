@@ -85,6 +85,18 @@ idempotent updates and safe uninstall. On Windows, the Claude config root is
 | **Desktop notify** | `Stop` | Sends macOS desktop notification with task summary (standard+) |
 | **Session end marker** | `SessionEnd` | Lifecycle marker and cleanup log |
 
+## Stdin Read Deadline
+
+The shared hook input reader, including the Bash dispatchers and `run-with-flags.js`,
+waits at most 3000 ms for stdin EOF. Set `ECC_HOOK_INPUT_TIMEOUT_MS` to a positive
+integer (up to 2147483647) to adjust this overall deadline. Invalid values use the
+default. Receiving more chunks does not reset the deadline.
+
+A timeout marks the input incomplete, just like a premature stream close. Safety
+hooks keep their incomplete-input blocking behavior; Bash post hooks skip incomplete
+requests rather than performing audit or other side effects on a partial event.
+Normal EOF cancels the timer and processes the complete request immediately.
+
 ## Customizing Hooks
 
 ### Disabling a Hook
