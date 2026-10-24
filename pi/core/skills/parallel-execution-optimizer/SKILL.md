@@ -66,7 +66,9 @@ and task setup; it does not require concurrent writes.
    versions and validity conditions; reuse them only while those conditions hold.
 3. Before each record's effect, check its current version, permissions,
    prerequisites, and exact intended effect. Shared preparation is not shared
-   authorization. Use conditional writes when supported; stop on a conflict.
+   authorization. Require a conditional write against the checked version, a
+   transaction that detects intervening changes, or a lock held across the check
+   and write. Stop on a conflict; if no such protection is available, do not write.
 4. Verify the actual outcome for that record. Carry forward its evidence and
    the remaining-work set after each verified success. An attempted write is
    not a verified success; reconcile an uncertain outcome before any retry.
@@ -90,7 +92,7 @@ Planner:
 Executor for A:
   confirm shared inputs are still valid
   read A's current version; check permission and prerequisites
-  determine exact effect; apply against that version; verify outcome
+  determine exact effect; apply with the same conflict protection; verify outcome
   carry forward verified = {A: outcome evidence}, remaining = [B, C]
 
 Executor for B, then C:
