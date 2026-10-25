@@ -86,6 +86,10 @@ Inputs:
 - Action-to-tool bindings (read/write/publish):
 - Selected entities, period, and exclusions (separate from search filters):
 
+Executor instructions:
+- Action-to-tool bindings:
+- Selected entities, period, and exclusions:
+
 Loop:
 1. Discover current state.
 2. Generate or update the smallest useful artifact.
@@ -102,6 +106,7 @@ Handoff:
 - Status:
 - Evidence:
 - Preserved tool bindings and entity scope; scoped binding changes (previous → new), explicit changes, authorization source, and phase:
+- Remaining-work report (selected entities, period, and exclusions):
 - Next action:
 ```
 
