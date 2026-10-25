@@ -4,6 +4,8 @@ ECC 2.0 renamed the repo (`affaan-m/everything-claude-code` → `affaan-m/ECC`) 
 
 ## TL;DR
 
+Before uninstalling, back up any saved plugin options, secrets, and data you need. Removing the last installation can delete them; see Claude Code's [uninstall reference](https://code.claude.com/docs/en/plugins/cli-reference#what-an-uninstall-deletes-and-keeps). If you registered 1.x through `settings.json`, follow the [marketplace declaration migration](#migrating-a-settingsjson-marketplace-declaration) below instead of the quick commands so you preserve your settings and plugin enablement choice.
+
 ```bash
 # 1. Install 2.0
 /plugin marketplace add https://github.com/affaan-m/ECC
@@ -13,7 +15,7 @@ ECC 2.0 renamed the repo (`affaan-m/everything-claude-code` → `affaan-m/ECC`) 
 /plugin uninstall everything-claude-code@everything-claude-code
 ```
 
-If you registered 1.x through `settings.json`, also [migrate its marketplace declaration](#migrating-a-settingsjson-marketplace-declaration). Then review any leftover 1.x folders (see below) and restart the session.
+Review any leftover 1.x folders (see below) and restart the session.
 
 ## "I now see two ECC plugins"
 
@@ -52,7 +54,7 @@ Uninstalling the old plugin does not itself replace a persistent `extraKnownMark
 
 ### Abandoned temporary marketplace clones
 
-If plugin storage is unexpectedly large, inspect both `~/.claude/plugins/marketplaces/` and `~/.claude/plugins/cache/` for `temp_git*` directories. A temporary-looking name alone does not prove a directory is abandoned. Compare its path against registered marketplace locations and installed plugin paths, and inspect its Git remote/configuration to identify its source. A former ECC URL is evidence of that clone's source, not proof that ECC caused repeated cloning.
+If plugin storage is unexpectedly large, first resolve the plugin root: use the effective `CLAUDE_CODE_PLUGIN_CACHE_DIR` value configured in your shell or the `env` key of the applicable settings files, or `~/.claude/plugins` when no override is set. This variable selects the parent directory for both marketplaces and the plugin cache. In settings JSON, use an absolute path: values such as `~` and `$HOME` are not shell-expanded. See Claude Code's [environment variable reference](https://code.claude.com/docs/en/env-vars). Inspect `marketplaces/` and `cache/` under that resolved root for `temp_git*` directories. A temporary-looking name alone does not prove a directory is abandoned. Compare its path against registered marketplace locations and installed plugin paths, and inspect its Git remote/configuration to identify its source. A former ECC URL is evidence of that clone's source, not proof that ECC caused repeated cloning.
 
 Close Claude Code sessions and ensure no install/update process is using a directory before considering cleanup. Back up anything needed and remove only individually verified abandoned clones. Do not blanket-delete the plugin registry, `known_marketplaces.json`, `installed_plugins.json`, active marketplaces, or active plugin caches. If you cannot establish that a directory is unused, leave it in place. Marketplace migration repairs stale declarations; it does not establish or fix Claude Code's temporary-clone cleanup behavior.
 
