@@ -1,6 +1,6 @@
 ---
 name: parallel-execution-optimizer
-description: Speed up a task by turning it into a dependency graph of parallel lanes with a lane matrix, batched reads and checks, write surfaces isolated by file, worktree, branch, or service, and a final verification table. Use when the user wants a task done much faster through parallel work, concurrent agents, batched tool calls, isolated worktrees, or many independent verification lanes without losing correctness.
+description: Speed up a task by turning it into a dependency graph of parallel lanes with a lane matrix, batched reads and checks, write surfaces isolated by file, worktree, branch, or service, and a final verification table. Use when the user wants a task done much faster through parallel work, concurrent agents, batched tool calls, isolated worktrees, many independent verification lanes, or bounded homogeneous work that reuses shared preparation while record operations remain sequential, without losing correctness.
 license: MIT
 metadata:
   origin: ECC
@@ -60,8 +60,10 @@ Reuse preparation when a finite group of records shares accepted invariant
 inputs, such as a mapping and tool contract. This reduces repeated discovery
 and task setup; it does not require concurrent writes.
 
-1. Define the bounded record set, done signal, accepted mapping/contract version,
-   and the dependencies or risks that require replanning.
+1. Define the bounded record set, owner-defined completion unit, ordering,
+   exclusions, done signal, accepted mapping/contract version, and replanning
+   conditions. Check selection coverage against the accepted source criteria;
+   validating selected records alone does not prove the set is complete.
 2. Discover shared sources and prepare invariant inputs once. Record their
    versions and validity conditions; reuse them only while those conditions hold.
 3. Before each record's effect, check its current version, permissions,
@@ -72,7 +74,11 @@ and task setup; it does not require concurrent writes.
 4. Verify the actual outcome for that record. Carry forward its evidence and
    the remaining-work set after each verified success. An attempted write is
    not a verified success; reconcile an uncertain outcome before any retry.
-5. Continue within the same bounded task while the contract and prerequisites
+5. Keep a group with one executor where the actual admission contract permits
+   it. If admission requires separate write kinds or stages, preserve those
+   boundaries and prepare the next permitted stage from verified returned keys
+   and versions; do not widen an assignment or bypass an approval for speed.
+6. Continue within the same bounded task while the contract and prerequisites
    remain valid. Create a separate task or review when a real dependency,
    changed contract, or risk requires it, rather than after every success.
 
@@ -133,6 +139,17 @@ connector change, confirm completed exclusions survive, failed/unattempted work
 requires current authorization, and ambiguous effects are reconciled first. Report
 what was actually executed separately from this proposed evaluation. Do not infer
 latency improvements or ECC/connector fault attribution from this example.
+
+For an already-ready group, retain readiness, handoff, and first-action times
+in the existing journal. Separate required checks and approval waits from
+coordinator waiting; client-side call overlap does not prove backend concurrency
+or throughput improvement. If a dependent step in GROUP_A is denied, hold it
+while authorized independent GROUP_B can proceed. Preserve chronological ordering
+within the owner's completion unit and all excluded records/intervals. Test a
+selection spelling variant and an excluded record against the accepted criteria;
+retain omitted eligible work and overflow before any unprepared write. Check
+that a version conflict or unavailable conflict protection produces no write.
+These remain proposed synthetic checks, not executed live-system results.
 
 ## Output Shape
 
