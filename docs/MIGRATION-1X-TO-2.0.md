@@ -64,9 +64,16 @@ Close Claude Code sessions and ensure no install/update process is using a direc
 
 `/plugin uninstall` removes the plugin from the active list, but can leave the old directory in the Claude plugin cache and any manual copies in your home directory.
 
-Safe to delete after the old plugin no longer appears in `/plugin` list:
+The old plugin disappearing from `/plugin list` does not prove its folder is abandoned. Before deleting an old plugin folder under the [resolved plugin root](#abandoned-temporary-marketplace-clones), verify all of the following:
 
-- The old plugin folder under the Claude plugins directory (e.g. `~/.claude/plugins/...everything-claude-code...`)
+- Its path is not a registered marketplace location or an installed plugin path; compare against `claude plugin marketplace list --json` and `claude plugin list --json` at each applicable scope.
+- Its Git remote and configuration identify it as an abandoned legacy clone, rather than an active marketplace or working checkout. A legacy name or URL alone is not enough.
+- No active Claude Code session or install/update process uses the directory. Close relevant sessions and finish or stop those operations before cleanup.
+
+Back up anything needed and delete only that individually verified abandoned folder. If any check is uncertain, leave it in place.
+
+For manual installations, review these separately:
+
 - A 1.x manual install in your home folder (a cloned `everything-claude-code/` directory), **if** you are not using it as a working checkout
 - Old manually-copied surfaces under `~/.claude/` (`skills/`, `commands/`, `agents/` entries that came from 1.x) — the 2.0 plugin provides current versions
 
